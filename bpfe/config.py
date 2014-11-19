@@ -16,6 +16,9 @@ INPUT_MAPPING = {
     'Fund_Description': 'fund_description',
     'Text_1': 'text_1'
 }
+REVERSE_INPUT_MAPPING = {}
+for key, value in INPUT_MAPPING.iteritems():
+    REVERSE_INPUT_MAPPING[value] = key
 
 LABEL_MAPPING = {
     'Function': 'function',
@@ -28,6 +31,9 @@ LABEL_MAPPING = {
     'Pre_K': 'pre_k',
     'Operating_Status': 'operating_status'
 }
+REVERSE_LABEL_MAPPING = {}
+for key, value in LABEL_MAPPING.iteritems():
+    REVERSE_LABEL_MAPPING[value] = key
 
 LABELS = {
     'Function': [
@@ -142,7 +148,7 @@ LABELS = {
         'Special Education',
         'Unspecified'
     ],
-    'Use:': [
+    'Use': [
         'Business Services',
         'ISPD',
         'Instruction',
@@ -153,3 +159,10 @@ LABELS = {
         'Untracked Budget Set-Aside'
     ]
 }
+
+FLAT_LABELS = []
+tups = [(k, v) for k, v in LABELS.iteritems()]
+tups.sort(key=lambda x: x[0])
+for tup in tups:
+    for value in tup[1]:
+        FLAT_LABELS.append((tup[0], value))
