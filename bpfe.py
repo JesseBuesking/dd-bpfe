@@ -1,22 +1,21 @@
-
-
-from datetime import datetime
 import os
 from os.path import dirname
+import random
 import sys
-from bpfe import load, plotting
+from bpfe import load, scoring
 from bpfe.config import FLAT_LABELS
 from bpfe.models.perceptron_model import PerceptronModel
 
 
-SEED = 1
+SEED = random.randint(1, sys.maxint)
 # AMT = 4000
 AMT = 400277
-ITERATIONS = 40
-DT = datetime.utcnow().strftime('%Y%m%d%H%M%S')
+ITERATIONS = 20
 loc = dirname(__file__) + '/results'
 if not os.path.exists(loc):
     os.makedirs(loc)
+filename = '{}-{}'.format(AMT, ITERATIONS)
+loc += '/' + filename
 
 
 def split_test_train(data, max_rows, train_percent):
@@ -29,7 +28,6 @@ def split_test_train(data, max_rows, train_percent):
 
 
 def run():
-    global loc
     # facility_or_department.info()
     # program_description.info()
     # job_title_description.info()
@@ -51,25 +49,21 @@ def run():
     random_data = load.generate_training_rows(SEED, AMT)
     train, test = split_test_train(random_data, AMT, 0.8)
 
-    loc += '/' + '{}-{}-{}-{}'.format(DT, AMT, SEED, ITERATIONS)
-    pm.train(train, test, nr_iter=ITERATIONS, seed=SEED, save_loc=loc)
-    plotting.plot_train_vs_validation(pm.scores, AMT)
+    pm.train(train, test, AMT, nr_iter=ITERATIONS, seed=SEED, save_loc=loc)
+    # plotting.plot_train_vs_validation(pm.scores, AMT)
 
 
 def predict():
-    with open('results/predictions-20141119091224-400277-1-40', 'w') as outfile:
+    with open('results/predictions-{}'.format(filename), 'w') as outfile:
         def write(x):
             outfile.write(x + '\n')
         _predict(write)
 
 
 def _predict(output_method, num_rows=None):
-    global loc
-
     if num_rows is None:
         num_rows = sys.maxint
 
-    loc += '/' + '20141119091224-400277-1-40'
     pm = PerceptronModel()
     pm.load(loc)
 
@@ -94,6 +88,42 @@ def _predict(output_method, num_rows=None):
         if i > num_rows:
             break
 
+
+def predict_train():
+    pm = PerceptronModel()
+    pm.load(loc)
+
+    actuals = []
+    predictions = []
+    for label, data in load.generate_training_rows(pm.seed, pm.amt):
+        prediction = pm.predict(data)
+        actuals.append(
+            PerceptronModel.label_output(label)[1:]
+        )
+        predictions.append(
+            PerceptronModel.prediction_output(data, prediction)[1:]
+        )
+
+    print('')
+    print('mc log loss: {}'.format(
+        round(scoring.multi_multi(actuals, predictions), 3)
+    ))
+
+
+def stats():
+    pm = PerceptronModel()
+    pm.load(loc)
+
+    print('')
+    header = 'Model Information'
+    print(header)
+    print('-'*len(header))
+    print(pm)
+    pm.print_scores()
+
+
 if __name__ == '__main__':
     predict()
+    # predict_train()
     # run()
+    stats()

@@ -1,6 +1,7 @@
 
 
 import csv
+import random
 import sys
 from bpfe.clean import clean_value
 from bpfe.config import INPUT_MAPPING, LABEL_MAPPING
@@ -23,6 +24,8 @@ def generate_training_rows(seed=1, amt=None):
     ret = []
     for label, data in generate_rows('data/TrainingData.csv', seed, amt):
         ret.append((label, data))
+    random.seed(seed)
+    random.shuffle(ret)
     return ret
 
 
@@ -51,3 +54,6 @@ def generate_rows(file_path, seed, amt):
                 setattr(l, LABEL_MAPPING[key], line[idx])
 
             yield l, d
+
+
+

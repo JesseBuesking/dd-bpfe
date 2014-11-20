@@ -17,7 +17,11 @@ INPUT_MAPPING = {
     'Text_1': 'text_1'
 }
 REVERSE_INPUT_MAPPING = {}
+INPUT_CODES = {}
+i = 0
 for key, value in INPUT_MAPPING.iteritems():
+    INPUT_CODES[value] = str(i)
+    i += 1
     REVERSE_INPUT_MAPPING[value] = key
 
 LABEL_MAPPING = {

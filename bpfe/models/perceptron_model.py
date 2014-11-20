@@ -2,25 +2,28 @@
 
 
 from __future__ import absolute_import
+from datetime import datetime
+import locale
+locale.setlocale(locale.LC_ALL, 'US')
 import random
 from collections import defaultdict
 import pickle
 import time
 from bpfe import scoring
-from bpfe.config import LABELS, LABEL_MAPPING, FLAT_LABELS
+from bpfe.config import LABELS, LABEL_MAPPING, FLAT_LABELS, INPUT_CODES
 from bpfe.models._perceptron import AveragedPerceptron
 
 
 class PerceptronModel(object):
     """ Greedy Averaged Perceptron predictor. """
 
+    __slots__ = ('model', 'classes', 'scores', 'seed', 'iterations', 'start',
+                 'end', 'amt')
+
     def __init__(self):
         self.model = AveragedPerceptron()
         self.classes = dict()
-        self.scores = {
-            'training': [],
-            'validation': []
-        }
+        self.scores = []
 
     def predict(self, data):
         """ Makes a prediction. """
@@ -28,7 +31,8 @@ class PerceptronModel(object):
         features = self._get_features(data)
         return self.model.predict(features)
 
-    def train(self, training_data, test_data, save_loc=None, nr_iter=5, seed=1):
+    def train(self, training_data, test_data, amt, save_loc=None, nr_iter=5,
+              seed=1):
         """
         Train a model from sentences, and save it at ``save_loc``. ``nr_iter``
         controls the number of Perceptron training iterations.
@@ -38,38 +42,42 @@ class PerceptronModel(object):
         :param save_loc: if not ``None``, saves a pickled model in this location
         :param nr_iter: number of training iterations
         """
+        self.amt = amt
+        self.seed = seed
+        self.iterations = nr_iter
+        self.start = datetime.utcnow()
         random.seed(seed)
         for key, values in LABELS.iteritems():
             self.classes[key] = set()
             for value in values:
                 self.classes[key].add(value)
 
+        self.print_header()
+
         self.model.classes = self.classes
         for iter_ in range(nr_iter):
             start = time.clock()
-            c = 0
-            n = 0
+            c_train = 0
+            n_train = 0
             for label, data in training_data:
                 feats = self._get_features(data)
                 guess = self.model.predict(feats)
                 self.model.update(label, guess, feats)
                 for real_key, key in LABEL_MAPPING.iteritems():
-                    c += guess.get(real_key) == getattr(label, key)
-                    n += 1
+                    c_train += guess.get(real_key) == getattr(label, key)
+                    n_train += 1
             random.shuffle(training_data)
-            print("iter {}: {}/{}={}%".format(iter_, c, n, _pc(c, n)))
-            self.scores['training'].append((iter_, c, n))
 
-            c = 0
-            n = 0
+            c_test = 0
+            n_test = 0
             actuals = []
             predictions = []
             for label, data in test_data:
                 feats = self._get_features(data)
                 guess = self.model.predict(feats)
                 for real_key, key in LABEL_MAPPING.iteritems():
-                    c += guess.get(real_key) == getattr(label, key)
-                    n += 1
+                    c_test += guess.get(real_key) == getattr(label, key)
+                    n_test += 1
 
                 actuals.append(
                     PerceptronModel.label_output(label)[1:]
@@ -79,20 +87,60 @@ class PerceptronModel(object):
                 )
 
             ll = scoring.multi_multi(actuals, predictions)
-
-            print("  validation: {}/{}={}% (ll: {})".format(
-                c,
-                n,
-                _pc(c, n),
-                round(ll, 4)
-            ))
+            ll_correct = scoring.multi_multi_correct(actuals, predictions)
             end = time.clock()
-            print("  elapsed: {}".format(end-start))
-            self.scores['validation'].append((iter_, c, n, ll))
+
+            score = (
+                iter_, c_train, n_train, c_test, n_test, ll, ll_correct,
+                _td(end - start)
+            )
+            self.print_score(score)
+            self.scores.append(score)
 
         self.model.average_weights()
+        self.end = datetime.utcnow()
         self.save(save_loc)
         return None
+
+    def print_scores(self):
+        self.print_header()
+        for score in self.scores:
+            self.print_score(score)
+
+    def print_header(self):
+        print('')
+        header = ''.join([
+            ' ' * 23,
+            'train score',
+            ' ' * 21,
+            'test score',
+            ' ' * 5,
+            'mc log loss',
+            ' ' * 5,
+            'mc log loss*',
+            ' ' * 5,
+            'elapsed time'
+        ])
+        print(header)
+        print('-' * len(header))
+
+    def print_score(self, score):
+        print('{:02d}: {:>20} = {}% {:>20} = {}% {:>15} {:>16} {:>16}'.format(
+            score[0],
+            '{}/{}'.format(
+                locale.format('%d', score[1], grouping=True),
+                locale.format('%d', score[2], grouping=True)
+            ),
+            '{:.03f}'.format(_pc(score[1], score[2])),
+            '{}/{}'.format(
+                locale.format('%d', score[3], grouping=True),
+                locale.format('%d', score[4], grouping=True)
+            ),
+            '{:.03f}'.format(_pc(score[3], score[4])),
+            '{:.03f}'.format(score[5]),
+            '{:.03f}'.format(score[6]),
+            '{}'.format(score[7])
+        ))
 
     def save(self, loc):
         """ Save the pickled model weights. """
@@ -102,16 +150,22 @@ class PerceptronModel(object):
         return pickle.dump((
             self.model.weights,
             self.classes,
-            self.scores
+            self.scores,
+            self.seed,
+            self.iterations,
+            self.start,
+            self.end,
+            self.amt
         ), open(loc, 'wb'), -1)
 
     def load(self, loc):
         """ Load the pickled model weights. """
         try:
-            w_c_s = pickle.load(open(loc, 'rb'))
+            pkl = pickle.load(open(loc, 'rb'))
         except IOError:
             raise Exception("missing {} file".format(loc))
-        self.weights, self.classes, self.scores = w_c_s
+        self.model.weights, self.classes, self.scores, self.seed, \
+        self.iterations, self.start, self.end, self.amt = pkl
         self.model.classes = self.classes
         return None
 
@@ -124,10 +178,11 @@ class PerceptronModel(object):
         def add(name, *args):
             features[' '.join((name,) + tuple(args))] += 1
 
-        # i += len(self.START)
         features = defaultdict(int)
-        for key in data.__slots__:
-            add(key, getattr(data, key))
+        for key in data.attributes:
+            name = INPUT_CODES[key]
+            add(name, getattr(data, key))
+
         # it's useful to have a constant feature which acts sort of like a prior
         add('bias')
         return features
@@ -158,6 +213,22 @@ class PerceptronModel(object):
                 r.append(0.0)
         return r
 
+    def __str__(self):
+        ret = ''
+        ret += 'iterations: {}\n'.format(self.iterations)
+        ret += 'amt: {}\n'.format(self.amt)
+        ret += 'seed: {}\n'.format(self.seed)
+        ret += 'start: {}\n'.format(self.start)
+        ret += 'end: {}'.format(self.end)
+        return ret
+
 
 def _pc(n, d):
     return round((float(n) / d) * 100, 2)
+
+
+def _td(value):
+    hours, remainder = divmod(value, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    return '%02d:%02d:%02d' % (hours, minutes, seconds)

@@ -5,7 +5,6 @@ efficiency.
 
 
 from collections import defaultdict
-import random
 from bpfe.config import LABEL_MAPPING
 
 
@@ -31,7 +30,7 @@ class AveragedPerceptron(object):
         Dot-product the features and current weights and return the best label.
         """
         scores = defaultdict(float)
-        for feat, value in features.iteritems():
+        for feat, value in features.items():
             if value == 0:
                 continue
 
@@ -65,7 +64,7 @@ class AveragedPerceptron(object):
             g = guess.get(real_key)
             if t == g:
                 continue
-            for f in features:
+            for f in features.keys():
                 weights = self.weights.setdefault(f, {})
                 upd_feat(t, f, weights.get(t, 0.0), 1.0)
                 upd_feat(g, f, weights.get(g, 0.0), -1.0)
@@ -84,21 +83,3 @@ class AveragedPerceptron(object):
                     new_feat_weights[klass] = averaged
             self.weights[feat] = new_feat_weights
         return None
-
-
-def train(nr_iter, examples):
-    """
-    Return an averaged perceptron model trained on ``examples`` for ``nr_iter``
-    iterations.
-    """
-    model = AveragedPerceptron()
-    for i in range(nr_iter):
-        random.shuffle(examples)
-        for features, class_ in examples:
-            scores = model.predict(features)
-            guess, score = max(scores.items(), key=lambda i: i[1])
-            if guess != class_:
-                model.update(class_, guess, features)
-    model.average_weights()
-    return model
-

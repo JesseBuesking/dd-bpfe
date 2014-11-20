@@ -10,6 +10,14 @@ class Data(object):
         'text_4', 'total', 'text_2', 'text_3', 'fund_description', 'text_1'
     )
 
+    attributes = (
+        'object_description', 'program_description',
+        'subfund_description', 'job_title_description',
+        'facility_or_department', 'sub_object_description',
+        'location_description', 'fte', 'function_description', 'position_extra',
+        'text_4', 'total', 'text_2', 'text_3', 'fund_description', 'text_1'
+    )
+
     def __str__(self):
         val = '{}:\n'.format(self.__class__.__name__)
         for key in self.__slots__:
