@@ -8,7 +8,7 @@ from bpfe.models.perceptron_model import PerceptronModel
 
 
 SEED = random.randint(1, sys.maxint)
-# AMT = 4000
+# AMT = 1000
 AMT = 400277
 ITERATIONS = 20
 loc = dirname(__file__) + '/results'
@@ -79,9 +79,12 @@ def _predict(output_method, num_rows=None):
 
     i = 0
     for data in load.generate_test_rows(SEED, sys.maxint):
-        prediction = pm.predict(data)
-        predicted = PerceptronModel.prediction_output(data, prediction)
-        output_line = ','.join([str(i) for i in predicted])
+        v = pm.predict_proba(data)
+        pred_tups = [data.id]
+        for raw_key in FLAT_LABELS:
+            pred_tups.append(v[raw_key])
+
+        output_line = ','.join([str(i) for i in pred_tups])
         output_method(output_line)
 
         i += 1
@@ -96,17 +99,22 @@ def predict_train():
     actuals = []
     predictions = []
     for label, data in load.generate_training_rows(pm.seed, pm.amt):
-        prediction = pm.predict(data)
+        # prediction = pm.predict(data)
         actuals.append(
             PerceptronModel.label_output(label)[1:]
         )
-        predictions.append(
-            PerceptronModel.prediction_output(data, prediction)[1:]
-        )
+        v = pm.predict_proba(data)
+        pred_tups = []
+        for raw_key in FLAT_LABELS:
+            pred_tups.append(v[raw_key])
+        predictions.append(pred_tups)
+        # predictions.append(
+        #     PerceptronModel.prediction_output(data, prediction)[1:]
+        # )
 
     print('')
     print('mc log loss: {}'.format(
-        round(scoring.multi_multi(actuals, predictions), 3)
+        round(scoring.multi_multi(actuals, predictions), 5)
     ))
 
 
@@ -123,7 +131,7 @@ def stats():
 
 
 if __name__ == '__main__':
-    predict()
-    # predict_train()
+    # predict()
+    predict_train()
     # run()
     stats()

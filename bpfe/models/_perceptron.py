@@ -5,7 +5,12 @@ efficiency.
 
 
 from collections import defaultdict
+import sys
 from bpfe.config import LABEL_MAPPING
+
+
+MAXVAL = sys.maxint
+MINVAL = -MAXVAL
 
 
 class AveragedPerceptron(object):
@@ -48,6 +53,45 @@ class AveragedPerceptron(object):
                 self.classes[key],
                 key=lambda x: (scores[x], x)
             )
+        return ret
+
+    def predict_proba(self, features):
+        """
+        Dot-product the features and current weights and return the best label.
+        """
+        scores = defaultdict(float)
+        for feat, value in features.items():
+            if value == 0:
+                continue
+
+            weights = self.weights.get(feat)
+            if weights is None:
+                continue
+
+            for label, weight in weights.items():
+                scores[label] += value * weight
+
+        # Do a secondary alphabetic sort, for stability
+        ret = dict()
+        for key in LABEL_MAPPING.keys():
+            small_scores = []
+            mini = MAXVAL
+            maxi = MINVAL
+            for x in self.classes[key]:
+                score = scores[x]
+                maxi = max(maxi, score)
+                mini = min(mini, score)
+                small_scores.append([x, score])
+
+            if maxi != mini:
+                divisor = maxi - mini
+            else:
+                divisor = 1
+
+            for l in small_scores:
+                l[1] = (l[1] - mini) / divisor
+                ret[(key, l[0])] = l[1]
+
         return ret
 
     def update(self, truth, guess, features):

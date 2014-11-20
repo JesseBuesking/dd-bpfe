@@ -31,6 +31,12 @@ class PerceptronModel(object):
         features = self._get_features(data)
         return self.model.predict(features)
 
+    def predict_proba(self, data):
+        """ Makes a prediction. """
+
+        features = self._get_features(data)
+        return self.model.predict_proba(features)
+
     def train(self, training_data, test_data, amt, save_loc=None, nr_iter=5,
               seed=1):
         """
