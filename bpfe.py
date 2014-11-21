@@ -2,15 +2,16 @@ import os
 from os.path import dirname
 import random
 import sys
-from bpfe import load, scoring
+from bpfe import load, scoring, feature_engineering
 from bpfe.config import FLAT_LABELS
 from bpfe.models.perceptron_model import PerceptronModel
 
 
-SEED = random.randint(1, sys.maxint)
-# AMT = 1000
+# SEED = random.randint(1, sys.maxint)
+SEED = 1
+# AMT = 20000
 AMT = 400277
-ITERATIONS = 20
+ITERATIONS = 60
 loc = dirname(__file__) + '/results'
 if not os.path.exists(loc):
     os.makedirs(loc)
@@ -47,6 +48,9 @@ def run():
     pm = PerceptronModel()
     # amt = sys.maxint
     random_data = load.generate_training_rows(SEED, AMT)
+
+    random_data = feature_engineering.update_features(random_data)
+
     train, test = split_test_train(random_data, AMT, 0.8)
 
     pm.train(train, test, AMT, nr_iter=ITERATIONS, seed=SEED, save_loc=loc)

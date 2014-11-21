@@ -18,6 +18,11 @@ class Data(object):
         'text_4', 'total', 'text_2', 'text_3', 'fund_description', 'text_1'
     )
 
+    attribute_types = (
+        str, str, str, str, str, str, str, float, str, str, str, float, str,
+        str, str, str
+    )
+
     def __str__(self):
         val = '{}:\n'.format(self.__class__.__name__)
         for key in self.__slots__:

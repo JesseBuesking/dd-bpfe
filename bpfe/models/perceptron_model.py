@@ -171,7 +171,7 @@ class PerceptronModel(object):
         except IOError:
             raise Exception("missing {} file".format(loc))
         self.model.weights, self.classes, self.scores, self.seed, \
-        self.iterations, self.start, self.end, self.amt = pkl
+            self.iterations, self.start, self.end, self.amt = pkl
         self.model.classes = self.classes
         return None
 
@@ -182,7 +182,14 @@ class PerceptronModel(object):
         trained.
         """
         def add(name, *args):
-            features[' '.join((name,) + tuple(args))] += 1
+            if len(args) > 0:
+                if isinstance(args[0], list):
+                    for l in args[0]:
+                        features[' '.join([name, l])] += 1
+                else:
+                    features[' '.join(((name,) + tuple(args)))] += 1
+            else:
+                features[name] += 1
 
         features = defaultdict(int)
         for key in data.attributes:
