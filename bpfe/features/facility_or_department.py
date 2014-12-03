@@ -1,8 +1,3 @@
-
-
-from bpfe import load
-
-
 # 86.54%  346391 :
 #  4.42%   17697 : all campus payroll
 #  3.63%   14537 : instruction and curriculum
@@ -19,9 +14,20 @@ from bpfe import load
 # unique entries: 173
 
 
-def info():
+import bpfe.load as load
+
+
+def info(num_chunks=None):
+    train = [i for i in load.gen_train(num_chunks)]
+    validate = [i for i in load.gen_validate(num_chunks)]
+    test = [i for i in load.gen_test(num_chunks)]
+    submission = [i for i in load.gen_submission(num_chunks)]
+    _info(train + validate + test + submission)
+
+
+def _info(rows):
     d = dict()
-    for label, data in load.generate_training_rows():
+    for data, label in rows:
         val = d.setdefault(data.facility_or_department, 0)
         d[data.facility_or_department] = val + 1
 

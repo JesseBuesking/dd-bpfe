@@ -1,12 +1,13 @@
 
 
 import pandas as pd
-# import matplotlib as mpl
-# mpl.use('svg')
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 
 def plot_train_vs_validation(scores, amt):
+    sns.set_palette("deep", desat=.6)
+    sns.set_context(rc={"figure.figsize": (8, 4)})
     d1 = pd.DataFrame(
         [(i[1], i[2]) for i in scores['training']],
         index=[i[0] for i in scores['training']],

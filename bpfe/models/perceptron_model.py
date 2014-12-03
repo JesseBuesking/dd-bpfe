@@ -65,7 +65,7 @@ class PerceptronModel(object):
             start = time.clock()
             c_train = 0
             n_train = 0
-            for label, data in training_data:
+            for data, label in training_data:
                 feats = self._get_features(data)
                 guess = self.model.predict(feats)
                 self.model.update(label, guess, feats)
@@ -78,7 +78,7 @@ class PerceptronModel(object):
             n_test = 0
             actuals = []
             predictions = []
-            for label, data in test_data:
+            for data, label in test_data:
                 feats = self._get_features(data)
                 guess = self.model.predict(feats)
                 for real_key, key in LABEL_MAPPING.iteritems():

@@ -1,8 +1,3 @@
-
-
-from bpfe import load
-
-
 # 55.04%  220313 :
 # 23.60%   94462 : regular
 # 17.69%   70812 : n/a
@@ -20,9 +15,20 @@ from bpfe import load
 # unique entries: 36
 
 
-def info():
+import bpfe.load as load
+
+
+def info(num_chunks=None):
+    train = [i for i in load.gen_train(num_chunks)]
+    validate = [i for i in load.gen_validate(num_chunks)]
+    test = [i for i in load.gen_test(num_chunks)]
+    submission = [i for i in load.gen_submission(num_chunks)]
+    _info(train + validate + test + submission)
+
+
+def _info(rows):
     d = dict()
-    for label, data in load.generate_training_rows():
+    for data, label in rows:
         val = d.setdefault(data.text_3, 0)
         d[data.text_3] = val + 1
 

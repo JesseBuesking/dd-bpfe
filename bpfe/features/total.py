@@ -1,8 +1,3 @@
-
-
-from bpfe import load
-
-
 # 1.14%    4555 :
 #  0.01%      57 : 0.22
 #  0.01%      55 : 0.12
@@ -20,9 +15,33 @@ from bpfe import load
 # unique entries: 286501
 
 
-def info():
+import bpfe.load as load
+from bpfe.util import isfloat
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
+def info(num_chunks=None):
+    train = [i for i in load.gen_train(num_chunks)]
+    validate = [i for i in load.gen_validate(num_chunks)]
+    test = [i for i in load.gen_test(num_chunks)]
+    submission = [i for i in load.gen_submission(num_chunks)]
+    _info(train + validate + test + submission)
+
+
+def _info(rows):
+    sns.set_palette("deep", desat=.6)
+    sns.set_context(rc={"figure.figsize": (10, 5)})
+
+    values = []
     d = dict()
-    for label, data in load.generate_training_rows():
+    for data, label in rows:
+        if isfloat(data.total):
+            tot = float(data.total)
+            if -10000 <= tot <= 120000:
+            # tot = min(tot, 120000)
+            # tot = max(tot, -10000)
+                values.append(tot)
         val = d.setdefault(data.total, 0)
         d[data.total] = val + 1
 
@@ -46,3 +65,18 @@ def info():
     print('')
     print('total entries: {}'.format(tots))
     print('unique entries: {}'.format(num_unique))
+
+    sns.distplot(
+        values,
+        25,
+        kde_kws={
+            "color": "seagreen",
+            "lw": 3,
+            "label": "KDE"
+        },
+        hist_kws={
+            "histtype": "stepfilled",
+            "color": "slategray"
+        }
+    )
+    plt.show()

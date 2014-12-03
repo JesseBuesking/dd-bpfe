@@ -1,8 +1,3 @@
-
-
-from bpfe import load
-
-
 # 30.81%  123327 : general fund
 # 23.34%   93422 :
 #  6.72%   26895 : operations
@@ -21,9 +16,20 @@ from bpfe import load
 # unique entries: 268
 
 
-def info():
+import bpfe.load as load
+
+
+def info(num_chunks=None):
+    train = [i for i in load.gen_train(num_chunks)]
+    validate = [i for i in load.gen_validate(num_chunks)]
+    test = [i for i in load.gen_test(num_chunks)]
+    submission = [i for i in load.gen_submission(num_chunks)]
+    _info(train + validate + test + submission)
+
+
+def _info(rows):
     d = dict()
-    for label, data in load.generate_training_rows():
+    for data, label in rows:
         val = d.setdefault(data.subfund_description, 0)
         d[data.subfund_description] = val + 1
 

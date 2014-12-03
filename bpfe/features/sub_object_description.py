@@ -1,8 +1,3 @@
-
-
-from bpfe import load
-
-
 # 77.12%  308674 :
 #  2.29%    9159 : extra duty pay/overtime for support personnel
 #  2.18%    8724 : certificated employees salaries and wages
@@ -19,9 +14,20 @@ from bpfe import load
 # unique entries: 167
 
 
-def info():
+import bpfe.load as load
+
+
+def info(num_chunks=None):
+    train = [i for i in load.gen_train(num_chunks)]
+    validate = [i for i in load.gen_validate(num_chunks)]
+    test = [i for i in load.gen_test(num_chunks)]
+    submission = [i for i in load.gen_submission(num_chunks)]
+    _info(train + validate + test + submission)
+
+
+def _info(rows):
     d = dict()
-    for label, data in load.generate_training_rows():
+    for data, label in rows:
         val = d.setdefault(data.sub_object_description, 0)
         d[data.sub_object_description] = val + 1
 

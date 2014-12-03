@@ -1,6 +1,9 @@
 
 
 # noinspection PyUnresolvedReferences
+from bpfe.config import LABELS, LABEL_MAPPING, FLAT_LABELS
+
+
 class Data(object):
     __slots__ = (
         'id', 'object_description', 'program_description',
@@ -30,7 +33,6 @@ class Data(object):
         return val
 
 
-# noinspection PyUnresolvedReferences
 class Label(object):
     __slots__ = (
         'id', 'function', 'use', 'sharing', 'reporting', 'student_type',
@@ -42,3 +44,15 @@ class Label(object):
         for key in self.__slots__:
             val += '  {:>25}: "{}"\n'.format(key, getattr(self, key))
         return val
+
+    def to_vec(self):
+        ret = [0] * len(FLAT_LABELS)
+
+        for idx, (key, val) in enumerate(FLAT_LABELS):
+            # noinspection PyTypeChecker
+            attr = LABEL_MAPPING[key]
+            value = getattr(self, attr)
+            if value == val:
+                ret[idx] = 1
+
+        return ret

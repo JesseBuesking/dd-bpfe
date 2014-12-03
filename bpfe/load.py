@@ -1,20 +1,29 @@
 
 
 import csv
+import os
 import random
 import sys
 from bpfe.clean import clean_value
 from bpfe.config import INPUT_MAPPING, LABEL_MAPPING
 from bpfe.entities import Data, Label
+from bpfe.feature_engineering import get_vectorizers
 from bpfe.reservoir import reservoir
+import math
+
+# noinspection PyBroadException
+try:
+    import cPickle as pickle
+except:
+    import pickle
 
 
-def generate_test_rows(seed=1, amt=None):
+def generate_submission_rows(seed=1, amt=None):
     if amt is None:
         amt = sys.maxint
     ret = []
-    for _, data in generate_rows('data/TestData.csv', seed, amt):
-        ret.append(data)
+    for data, _ in generate_rows('data/TestData.csv', seed, amt):
+        ret.append((data, None))
     return ret
 
 
@@ -22,8 +31,8 @@ def generate_training_rows(seed=1, amt=None):
     if amt is None:
         amt = sys.maxint
     ret = []
-    for label, data in generate_rows('data/TrainingData.csv', seed, amt):
-        ret.append((label, data))
+    for data, label in generate_rows('data/TrainingData.csv', seed, amt):
+        ret.append((data, label))
     random.seed(seed)
     random.shuffle(ret)
     return ret
@@ -53,7 +62,89 @@ def generate_rows(file_path, seed, amt):
             for key, idx in label_index_map.iteritems():
                 setattr(l, LABEL_MAPPING[key], line[idx])
 
-            yield l, d
+            yield d, l
 
 
+def split_test_train(data):
+    batch_size = 10000
+    validate_data = data[:batch_size]
+    data = data[batch_size:]
+    test_data = data[:batch_size]
+    train_data = data[batch_size:]
+    return validate_data, test_data, train_data
 
+
+def store_raw(seed=1, verbose=False):
+    random_data = generate_training_rows(seed)
+    validate, test, train = split_test_train(random_data)
+    submission = generate_submission_rows(seed)
+    chunk_size = 5000
+    if verbose:
+        print('{}, {}, {}, {}'.format(
+            len(train),
+            len(validate),
+            len(test),
+            len(submission)
+        ))
+
+    def store_in_chunks(data, name):
+        with open('data/raw-{}.pkl'.format(name), 'wb') as datafile:
+            chunks = len(data) / float(chunk_size)
+            chunks = int(math.ceil(chunks))
+            pickle.dump(chunks, datafile, -1)
+            # noinspection PyArgumentList
+            for i in xrange(0, len(data), chunk_size):
+                pickle.dump(data[i: i + chunk_size], datafile, -1)
+
+    store_in_chunks(validate, 'validate')
+    store_in_chunks(test, 'test')
+    store_in_chunks(submission, 'submission')
+    store_in_chunks(train, 'train')
+
+
+def gen_validate(num_chunks=None):
+    for data in _gen_name('validate', num_chunks):
+        yield data
+
+
+def gen_test(num_chunks=None):
+    for data in _gen_name('test', num_chunks):
+        yield data
+
+
+def gen_train(num_chunks=None):
+    for data in _gen_name('train', num_chunks):
+        yield data
+
+
+def gen_submission(num_chunks=None):
+    for data in _gen_name('submission', num_chunks):
+        yield data
+
+
+def _gen_name(name, num_chunks=None):
+    if num_chunks is None:
+        num_chunks = sys.maxint
+
+    with open('data/raw-{}.pkl'.format(name), 'rb') as datafile:
+        chunks = pickle.load(datafile)
+        for i in range(chunks):
+            if i >= num_chunks:
+                break
+
+            yield pickle.load(datafile)
+
+
+def load_vectorizers(num_chunks):
+    print('loading vectorizers')
+    fname = 'data/vectorizers-{}.pkl'.format(num_chunks)
+    if os.path.exists(fname):
+        with open(fname, 'rb') as ifile:
+            v = pickle.load(ifile)
+    else:
+        print('creating vectorizers for {} chunks'.format(num_chunks))
+        v = get_vectorizers(num_chunks)
+        with open(fname, 'wb') as ifile:
+            pickle.dump(v, ifile, -1)
+
+    return v

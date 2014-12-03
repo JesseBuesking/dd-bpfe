@@ -1,8 +1,3 @@
-
-
-from bpfe import load
-
-
 # 11.87%   47495 : employee benefits
 #  7.93%   31761 : salaries of part time employee
 #  6.19%   24784 :
@@ -19,9 +14,20 @@ from bpfe import load
 # unique entries: 574
 
 
-def info():
+import bpfe.load as load
+
+
+def info(num_chunks=None):
+    train = [i for i in load.gen_train(num_chunks)]
+    validate = [i for i in load.gen_validate(num_chunks)]
+    test = [i for i in load.gen_test(num_chunks)]
+    submission = [i for i in load.gen_submission(num_chunks)]
+    _info(train + validate + test + submission)
+
+
+def _info(rows):
     d = dict()
-    for label, data in load.generate_training_rows():
+    for data, label in rows:
         val = d.setdefault(data.object_description, 0)
         d[data.object_description] = val + 1
 

@@ -1,8 +1,3 @@
-
-
-from bpfe import load
-
-
 # 26.87%  107541 :
 #  7.73%   30957 : teacher, elementary
 #  5.86%   23450 : teacher, short term sub
@@ -32,9 +27,20 @@ from bpfe import load
 # unique entries: 3286
 
 
-def info():
+import bpfe.load as load
+
+
+def info(num_chunks=None):
+    train = [i for i in load.gen_train(num_chunks)]
+    validate = [i for i in load.gen_validate(num_chunks)]
+    test = [i for i in load.gen_test(num_chunks)]
+    submission = [i for i in load.gen_submission(num_chunks)]
+    _info(train + validate + test + submission)
+
+
+def _info(rows):
     d = dict()
-    for label, data in load.generate_training_rows():
+    for data, label in rows:
         val = d.setdefault(data.job_title_description, 0)
         d[data.job_title_description] = val + 1
 
