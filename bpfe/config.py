@@ -170,3 +170,12 @@ tups.sort(key=lambda x: x[0])
 for tup in tups:
     for value in tup[1]:
         FLAT_LABELS.append((tup[0], value))
+
+KLASS_LABEL_INFO = dict()
+_klass_idx = 0
+for tup in FLAT_LABELS:
+    if tup[0] not in KLASS_LABEL_INFO:
+        KLASS_LABEL_INFO[tup[0]] = (_klass_idx, 0)
+        _klass_idx += 1
+    info = KLASS_LABEL_INFO[tup[0]]
+    KLASS_LABEL_INFO[tup[0]] = (info[0], info[1] + 1)

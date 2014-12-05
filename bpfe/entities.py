@@ -1,7 +1,7 @@
 
 
 # noinspection PyUnresolvedReferences
-from bpfe.config import LABELS, LABEL_MAPPING, FLAT_LABELS
+from bpfe.config import LABELS, LABEL_MAPPING, FLAT_LABELS, KLASS_LABEL_INFO
 
 
 class Data(object):
@@ -45,10 +45,12 @@ class Label(object):
             val += '  {:>25}: "{}"\n'.format(key, getattr(self, key))
         return val
 
-    def to_vec(self):
+    def to_vec(self, klass_num=None):
         ret = [0] * len(FLAT_LABELS)
 
         for idx, (key, val) in enumerate(FLAT_LABELS):
+            if klass_num is not None and KLASS_LABEL_INFO[key][0] != klass_num:
+                continue
             # noinspection PyTypeChecker
             attr = LABEL_MAPPING[key]
             value = getattr(self, attr)
@@ -56,3 +58,15 @@ class Label(object):
                 ret[idx] = 1
 
         return ret
+
+    def to_klass_num(self, klass_num):
+        ret_idx = 0
+        for _, (key, val) in enumerate(FLAT_LABELS):
+            if KLASS_LABEL_INFO[key][0] != klass_num:
+                continue
+            # noinspection PyTypeChecker
+            attr = LABEL_MAPPING[key]
+            value = getattr(self, attr)
+            if value == val:
+                return ret_idx
+            ret_idx += 1
