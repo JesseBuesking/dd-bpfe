@@ -44,7 +44,6 @@ class HiddenLayer(object):
         :param activation: Non linearity to be applied in the hidden
                            layer
         """
-        self.input = layer_input
         # end-snippet-1
 
         # `W` is initialized with `W_values` which is uniformely sampled
@@ -233,7 +232,7 @@ class DBN(object):
         index = T.lscalar('index')  # index to a minibatch
         learning_rate = T.scalar('lr')  # learning rate to use
 
-        # begining of a batch, given `index`
+        # beginning of a batch, given `index`
         batch_begin = index * batch_size
         # ending of a batch given `index`
         batch_end = batch_begin + batch_size
@@ -243,8 +242,8 @@ class DBN(object):
         # get the cost and the updates list
         # using CD-k here (persisent=None) for training each RBM.
         # TODO: change cost function to reconstruction error
-        cost, updates = rbm.get_cost_updates(learning_rate,
-                                             persistent=None, k=k)
+        cost, updates = rbm.get_cost_updates(
+            learning_rate, persistent=None, k=k)
 
         # compile the theano function
         fn = theano.function(

@@ -305,9 +305,29 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
     start_time = time.clock()
     ## Pre-train layer-wise
     for i in xrange(dbn.n_layers):
-
-        print '... getting the pre-training function'
         dbn.hidden_layer_sizes[i] = 1000
+        rbm_info = [
+            i,
+            k,
+            pretraining_epochs,
+            batch_size,
+            dbn.hidden_layer_sizes[i],
+            pretrain_lr
+        ]
+        filename = 'data/hidden_layers/{}.pkl'.format(
+            '-'.join([str(s) for s in rbm_info])
+        )
+        if os.path.exists(filename):
+            print('layer {} already exists on disk, loading ...'.format(i))
+            with open(filename, 'rb') as ifile:
+                data = pickle.load(ifile)
+                dbn = data[0]
+                total_size = data[1]
+                numpy_rng = data[2]
+                theano_rng = data[3]
+                continue
+
+        print('getting the pre-training function for layer {} ...'.format(i))
         pretraining_fn = dbn.pretraining_function(
             train_set_x,
             batch_size,
@@ -340,6 +360,10 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
                     i, epoch, numpy.mean(c), time.clock() - start
                 )
             )
+
+        with open(filename, 'wb') as ifile:
+            data = (dbn, total_size, numpy_rng, theano_rng)
+            pickle.dump(data, ifile)
 
     total_size /= dbn.n_layers
 
