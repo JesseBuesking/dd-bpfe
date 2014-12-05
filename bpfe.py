@@ -6,6 +6,7 @@ import sys
 import math
 import time
 import theano
+from theano.tensor.shared_randomstreams import RandomStreams
 from bpfe import scoring, feature_engineering
 from bpfe.config import FLAT_LABELS
 from bpfe.dl_dbn.logistic_sgd import load_data
@@ -250,14 +251,14 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
     :param batch_size: the size of a minibatch
     """
     batch_size = 5
-    pretraining_epochs = 5
-    training_epochs = 5
+    pretraining_epochs = 1
+    training_epochs = 1
 
     total_size = 0
 
     datasets = load_data(dataset)
 
-    num_chunks = 2
+    num_chunks = 1
     v = load.load_vectorizers(num_chunks)
 
     # def print_sizes(gen, name):
@@ -276,7 +277,6 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
     train_set_x, train_set_y = datasets[0]
     valid_set_x, valid_set_y = datasets[1]
     test_set_x, test_set_y = datasets[2]
-    # xall = datasets[3]
 
     for _ in gen(load.gen_train, train_set_x, train_set_y, num_chunks):
         break
@@ -284,26 +284,39 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
     print('input size: {}'.format(input_size))
 
     # numpy random generator
+    # noinspection PyUnresolvedReferences
     numpy_rng = numpy.random.RandomState(123)
+    # theano random generator
+    theano_rng = RandomStreams(numpy_rng.randint(2 ** 30))
     print '... building the model'
     # construct the Deep Belief Network
-    dbn = DBN(numpy_rng=numpy_rng, n_ins=input_size,
-              hidden_layers_sizes=[1000, 1000, 1000],
-              n_outs=104)
+    dbn = DBN(
+        n_ins=input_size,
+        hidden_layers_sizes=[1000, 1000, 1000],
+        n_outs=104
+    )
 
     # start-snippet-2
     #########################
     # PRETRAINING THE MODEL #
     #########################
-    print '... getting the pretraining functions'
-    pretraining_fns = dbn.pretraining_functions(train_set_x=train_set_x,
-                                                batch_size=batch_size,
-                                                k=k)
 
     print '... pre-training the model'
     start_time = time.clock()
     ## Pre-train layer-wise
     for i in xrange(dbn.n_layers):
+
+        print '... getting the pre-training function'
+        dbn.hidden_layer_sizes[i] = 1000
+        pretraining_fn = dbn.pretraining_function(
+            train_set_x,
+            batch_size,
+            k,
+            i,
+            numpy_rng,
+            theano_rng
+        )
+
         # go through pretraining epochs
         for epoch in xrange(pretraining_epochs):
             start = time.clock()
@@ -319,7 +332,7 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
                 n_train_batches = row_len / batch_size
                 for batch_index in xrange(n_train_batches):
                     c.append(
-                        pretraining_fns[i](index=batch_index, lr=pretrain_lr)
+                        pretraining_fn(index=batch_index, lr=pretrain_lr)
                     )
 
             print(
@@ -338,6 +351,8 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
     ########################
     # FINETUNING THE MODEL #
     ########################
+
+    dbn.create_output_layer()
 
     # get the training, validation and testing function for the model
     print '... getting the finetuning functions'

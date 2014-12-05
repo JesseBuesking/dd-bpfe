@@ -12,14 +12,88 @@ import theano.tensor as T
 from theano.tensor.shared_randomstreams import RandomStreams
 
 from logistic_sgd import LogisticRegression, load_data
-from mlp import HiddenLayer
 from rbm import RBM
+
+
+# start-snippet-1
+class HiddenLayer(object):
+    def __init__(self, rng, layer_input, n_in, n_out, W=None, b=None,
+                 activation=T.tanh):
+        """
+        Typical hidden layer of a MLP: units are fully-connected and have
+        sigmoidal activation function. Weight matrix W is of shape (n_in,n_out)
+        and the bias vector b is of shape (n_out,).
+
+        NOTE : The nonlinearity used here is tanh
+
+        Hidden unit activation is given by: tanh(dot(input,W) + b)
+
+        :type rng: numpy.random.RandomState
+        :param rng: a random number generator used to initialize weights
+
+        :type layer_input: theano.tensor.dmatrix
+        :param layer_input: a symbolic tensor of shape (n_examples, n_in)
+
+        :type n_in: int
+        :param n_in: dimensionality of input
+
+        :type n_out: int
+        :param n_out: number of hidden units
+
+        :type activation: theano.Op or function
+        :param activation: Non linearity to be applied in the hidden
+                           layer
+        """
+        self.input = layer_input
+        # end-snippet-1
+
+        # `W` is initialized with `W_values` which is uniformely sampled
+        # from sqrt(-6./(n_in+n_hidden)) and sqrt(6./(n_in+n_hidden))
+        # for tanh activation function
+        # the output of uniform if converted using asarray to dtype
+        # theano.config.floatX so that the code is runable on GPU
+        # Note : optimal initialization of weights is dependent on the
+        #        activation function used (among other things).
+        #        For example, results presented in [Xavier10] suggest that you
+        #        should use 4 times larger initial weights for sigmoid
+        #        compared to tanh
+        #        We have no info for other function, so we use the same as
+        #        tanh.
+        if W is None:
+            W_values = numpy.asarray(
+                rng.uniform(
+                    low=-numpy.sqrt(6. / (n_in + n_out)),
+                    high=numpy.sqrt(6. / (n_in + n_out)),
+                    size=(n_in, n_out)
+                ),
+                dtype=theano.config.floatX
+            )
+            if activation == theano.tensor.nnet.sigmoid:
+                W_values *= 4
+
+            W = theano.shared(value=W_values, name='W', borrow=True)
+
+        if b is None:
+            b_values = numpy.zeros((n_out,), dtype=theano.config.floatX)
+            b = theano.shared(value=b_values, name='b', borrow=True)
+
+        self.W = W
+        self.b = b
+
+        lin_output = T.dot(layer_input, self.W) + self.b
+        self.output = (
+            lin_output if activation is None
+            else activation(lin_output)
+        )
+        # parameters of the model
+        self.params = [self.W, self.b]
 
 
 # start-snippet-1
 # noinspection PyCallingNonCallable
 class DBN(object):
-    """Deep Belief Network
+    """
+    Deep Belief Network
 
     A deep belief network is obtained by stacking several RBMs on top of each
     other. The hidden layer of the RBM at layer `i` becomes the input of the
@@ -29,25 +103,16 @@ class DBN(object):
     regression layer on top.
     """
 
-    def __init__(self, numpy_rng, theano_rng=None, n_ins=784,
-                 hidden_layers_sizes=[500, 500], n_outs=10):
-        """This class is made to support a variable number of layers.
-
-        :type numpy_rng: numpy.random.RandomState
-        :param numpy_rng: numpy random number generator used to draw initial
-                    weights
-
-        :type theano_rng: theano.tensor.shared_randomstreams.RandomStreams
-        :param theano_rng: Theano random generator; if None is given one is
-                           generated based on a seed drawn from `rng`
+    # noinspection PyDefaultArgument
+    def __init__(self, n_ins=784, hidden_layers_sizes=[500, 500], n_outs=10):
+        """
+        This class is made to support a variable number of layers.
 
         :type n_ins: int
         :param n_ins: dimension of the input to the DBN
-
         :type hidden_layers_sizes: list of ints
         :param hidden_layers_sizes: intermediate layers size, must contain
-                               at least one value
-
+         at least one value
         :type n_outs: int
         :param n_outs: dimension of the output of the network
         """
@@ -56,77 +121,86 @@ class DBN(object):
         self.rbm_layers = []
         self.params = []
         self.n_layers = len(hidden_layers_sizes)
+        self.hidden_layer_sizes = hidden_layers_sizes
+        self.number_of_inputs = n_ins
+        self.number_of_outputs = n_outs
 
         assert self.n_layers > 0
 
-        if not theano_rng:
-            theano_rng = RandomStreams(numpy_rng.randint(2 ** 30))
-
         # allocate symbolic variables for the data
-        self.x = T.matrix('x')  # the data is presented as rasterized images
-        self.y = T.ivector('y')  # the labels are presented as 1D vector
-                                 # of [int] labels
+        # the data is presented as rasterized images
+        self.x = T.matrix('x')
+        # the labels are presented as 1D vector of [int] labels
+        self.y = T.ivector('y')
+
         # end-snippet-1
         # The DBN is an MLP, for which all weights of intermediate
         # layers are shared with a different RBM.  We will first
         # construct the DBN as a deep multilayer perceptron, and when
         # constructing each sigmoidal layer we also construct an RBM
         # that shares weights with that layer. During pretraining we
-        # will train these RBMs (which will lead to chainging the
+        # will train these RBMs (which will lead to changing the
         # weights of the MLP as well) During finetuning we will finish
         # training the DBN by doing stochastic gradient descent on the
         # MLP.
 
-        for i in xrange(self.n_layers):
-            # construct the sigmoidal layer
+    def create_hidden_layer(self, layer_num, numpy_rng, theano_rng):
+        # construct the sigmoidal layer
+        # the size of the input is either the number of hidden
+        # units of the layer below or the input size if we are on
+        # the first layer
+        if layer_num == 0:
+            input_size = self.number_of_inputs
+        else:
+            input_size = self.hidden_layer_sizes[layer_num - 1]
 
-            # the size of the input is either the number of hidden
-            # units of the layer below or the input size if we are on
-            # the first layer
-            if i == 0:
-                input_size = n_ins
-            else:
-                input_size = hidden_layers_sizes[i - 1]
+        # the input to this layer is either the activation of the
+        # hidden layer below or the input of the DBN if you are on
+        # the first layer
+        if layer_num == 0:
+            layer_input = self.x
+        else:
+            layer_input = self.sigmoid_layers[-1].output
 
-            # the input to this layer is either the activation of the
-            # hidden layer below or the input of the DBN if you are on
-            # the first layer
-            if i == 0:
-                layer_input = self.x
-            else:
-                layer_input = self.sigmoid_layers[-1].output
+        sigmoid_layer = HiddenLayer(
+            rng=numpy_rng,
+            layer_input=layer_input,
+            n_in=input_size,
+            n_out=self.hidden_layer_sizes[layer_num],
+            activation=T.nnet.sigmoid
+        )
 
-            sigmoid_layer = HiddenLayer(rng=numpy_rng,
-                                        input=layer_input,
-                                        n_in=input_size,
-                                        n_out=hidden_layers_sizes[i],
-                                        activation=T.nnet.sigmoid)
+        # add the layer to our list of layers
+        self.sigmoid_layers.append(sigmoid_layer)
 
-            # add the layer to our list of layers
-            self.sigmoid_layers.append(sigmoid_layer)
+        # its arguably a philosophical question...  but we are
+        # going to only declare that the parameters of the
+        # sigmoid_layers are parameters of the DBN. The visible
+        # biases in the RBM are parameters of those RBMs, but not
+        # of the DBN.
+        self.params.extend(sigmoid_layer.params)
 
-            # its arguably a philosophical question...  but we are
-            # going to only declare that the parameters of the
-            # sigmoid_layers are parameters of the DBN. The visible
-            # biases in the RBM are parameters of those RBMs, but not
-            # of the DBN.
-            self.params.extend(sigmoid_layer.params)
+        # Construct an RBM that shared weights with this layer
+        rbm_layer = RBM(
+            numpy_rng=numpy_rng,
+            theano_rng=theano_rng,
+            input=layer_input,
+            n_visible=input_size,
+            n_hidden=self.hidden_layer_sizes[layer_num],
+            W=sigmoid_layer.W,
+            hbias=sigmoid_layer.b
+        )
+        self.rbm_layers.append(rbm_layer)
 
-            # Construct an RBM that shared weights with this layer
-            rbm_layer = RBM(numpy_rng=numpy_rng,
-                            theano_rng=theano_rng,
-                            input=layer_input,
-                            n_visible=input_size,
-                            n_hidden=hidden_layers_sizes[i],
-                            W=sigmoid_layer.W,
-                            hbias=sigmoid_layer.b)
-            self.rbm_layers.append(rbm_layer)
+        return rbm_layer
 
+    def create_output_layer(self):
         # We now need to add a logistic layer on top of the MLP
         self.logLayer = LogisticRegression(
             input=self.sigmoid_layers[-1].output,
-            n_in=hidden_layers_sizes[-1],
-            n_out=n_outs)
+            n_in=self.hidden_layer_sizes[-1],
+            n_out=self.number_of_outputs
+        )
         self.params.extend(self.logLayer.params)
 
         # compute the cost for second phase of training, defined as the
@@ -138,8 +212,9 @@ class DBN(object):
         # minibatch given by self.x and self.y
         self.errors = self.logLayer.errors(self.y)
 
-    def pretraining_functions(self, train_set_x, batch_size, k):
-        '''Generates a list of functions, for performing one step of
+    def pretraining_function(self, train_set_x, batch_size, k, layer_num,
+                             numpy_rng, theano_rng):
+        """Generates a list of functions, for performing one step of
         gradient descent at a given layer. The function will require
         as input the minibatch index, and to train an RBM you just
         need to iterate, calling the corresponding function on all
@@ -152,44 +227,38 @@ class DBN(object):
         :param batch_size: size of a [mini]batch
         :param k: number of Gibbs steps to do in CD-k / PCD-k
 
-        '''
+        """
 
         # index to a [mini]batch
         index = T.lscalar('index')  # index to a minibatch
         learning_rate = T.scalar('lr')  # learning rate to use
 
-        # number of batches
-        n_batches = train_set_x.get_value(borrow=True).shape[0] / batch_size
         # begining of a batch, given `index`
         batch_begin = index * batch_size
         # ending of a batch given `index`
         batch_end = batch_begin + batch_size
 
-        pretrain_fns = []
-        for rbm in self.rbm_layers:
+        rbm = self.create_hidden_layer(layer_num, numpy_rng, theano_rng)
 
-            # get the cost and the updates list
-            # using CD-k here (persisent=None) for training each RBM.
-            # TODO: change cost function to reconstruction error
-            cost, updates = rbm.get_cost_updates(learning_rate,
-                                                 persistent=None, k=k)
+        # get the cost and the updates list
+        # using CD-k here (persisent=None) for training each RBM.
+        # TODO: change cost function to reconstruction error
+        cost, updates = rbm.get_cost_updates(learning_rate,
+                                             persistent=None, k=k)
 
-            # compile the theano function
-            fn = theano.function(
-                inputs=[index, theano.Param(learning_rate, default=0.1)],
-                outputs=cost,
-                updates=updates,
-                givens={
-                    self.x: train_set_x[batch_begin:batch_end]
-                }
-            )
-            # append `fn` to the list of functions
-            pretrain_fns.append(fn)
-
-        return pretrain_fns
+        # compile the theano function
+        fn = theano.function(
+            inputs=[index, theano.Param(learning_rate, default=0.1)],
+            outputs=cost,
+            updates=updates,
+            givens={
+                self.x: train_set_x[batch_begin:batch_end]
+            }
+        )
+        return fn
 
     def build_finetune_functions(self, datasets, batch_size, learning_rate):
-        '''Generates a function `train` that implements one step of
+        """Generates a function `train` that implements one step of
         finetuning, a function `validate` that computes the error on a
         batch from the validation set, and a function `test` that
         computes the error on a batch from the testing set
@@ -205,17 +274,11 @@ class DBN(object):
         :type learning_rate: float
         :param learning_rate: learning rate used during finetune stage
 
-        '''
+        """
 
         (train_set_x, train_set_y) = datasets[0]
         (valid_set_x, valid_set_y) = datasets[1]
         (test_set_x, test_set_y) = datasets[2]
-
-        # compute number of minibatches for training, validation and testing
-        n_valid_batches = valid_set_x.get_value(borrow=True).shape[0]
-        n_valid_batches /= batch_size
-        n_test_batches = test_set_x.get_value(borrow=True).shape[0]
-        n_test_batches /= batch_size
 
         index = T.lscalar('index')  # index to a [mini]batch
 
@@ -320,24 +383,20 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
     tsx = train_set_x.eval()
     valid_set_x, valid_set_y = datasets[1]
     test_set_x, test_set_y = datasets[2]
-    # xall = datasets[3]
 
     # numpy random generator
+    # noinspection PyUnresolvedReferences
     numpy_rng = numpy.random.RandomState(123)
+    # theano random generator
+    theano_rng = RandomStreams(numpy_rng.randint(2 ** 30))
     print '... building the model'
     # construct the Deep Belief Network
-    dbn = DBN(numpy_rng=numpy_rng, n_ins=28 * 28,
-              hidden_layers_sizes=[1000, 1000, 1000],
-              n_outs=10)
+    dbn = DBN(n_ins=28 * 28, hidden_layers_sizes=[1000, 1000, 1000], n_outs=10)
 
     # start-snippet-2
     #########################
     # PRETRAINING THE MODEL #
     #########################
-    print '... getting the pretraining functions'
-    pretraining_fns = dbn.pretraining_functions(train_set_x=train_set_x,
-                                                batch_size=batch_size,
-                                                k=k)
 
     pieces = 100
     csize = math.ceil(tsx.shape[0]/pieces)
@@ -349,6 +408,10 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
     start_time = time.clock()
     ## Pre-train layer-wise
     for i in xrange(dbn.n_layers):
+        print '... getting the pretraining function'
+        pretraining_fns = dbn.pretraining_function(
+            train_set_x, batch_size, k, i, numpy_rng, theano_rng)
+
         # go through pretraining epochs
         for epoch in xrange(pretraining_epochs):
             start = time.clock()
@@ -381,6 +444,8 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
     ########################
     # FINETUNING THE MODEL #
     ########################
+
+    dbn.create_output_layer()
 
     # get the training, validation and testing function for the model
     print '... getting the finetuning functions'
