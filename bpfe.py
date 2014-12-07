@@ -62,106 +62,46 @@ def _get_np_array(shape, dtype):
     return NP_ARRAY
 
 
-def to_np_array(vectzers, data, klass_num, skip_labels=False):
-    attributes = [
-        'object_description', 'program_description',
-        'subfund_description', 'job_title_description',
-        'facility_or_department', 'sub_object_description',
-        'location_description', 'fte', 'function_description', 'position_extra',
-        'text_4', 'total', 'text_2', 'text_3', 'fund_description', 'text_1'
-    ]
-
-    vecs = []
-    for d, _ in data:
-        avecs = []
-        for attr in attributes:
-            v, settings, method_name = vectzers[attr]
-            if attr in {'fte', 'total'}:
-                avec = bucket_vectorizer_transform(v, getattr(d, attr), settings)
-            else:
-                avec = text_vectorizer_transform(v, getattr(d, attr), settings)
-
-            m = getattr(feature_engineering, method_name)
-            avec = m(v, getattr(d, attr), settings)
-            avecs.append(avec)
-
-        vecs.append(np.concatenate(avecs, axis=1)[0])
-
-    try:
-        # noinspection PyUnresolvedReferences
-        vecs = np.array(vecs, dtype=theano.config.floatX)
-    except:
-        if isinstance(vecs, list):
-            print(len(vecs))
-        else:
-            print(vecs.shape)
-        raise
-
-    if not skip_labels:
-        labels = []
-        for _, label in data:
-            if label is None:
-                break
-
-            labels.append(label.to_klass_num(klass_num))
-
-        if len(labels) > 0:
+def vectorize(generator, X, Y, num_chunks, klass_num):
+    batch_size = 5000
+    data_len, index = 0, 0
+    full_data, full_labels = None, None
+    for data, labels in generator(num_chunks):
+        if full_data is None:
             # noinspection PyUnresolvedReferences
-            labels = np.array(labels, dtype=theano.config.floatX)
-    else:
-        labels = None
+            full_data = _get_np_ndarray(
+                shape=(batch_size, data.shape[1]),
+                dtype=theano.config.floatX
+            )
+            # noinspection PyUnresolvedReferences
+            full_labels = _get_np_array(
+                shape=(batch_size,),
+                dtype=theano.config.floatX
+            )
+        data_len += data.shape[0]
 
-    return vecs, labels
+        start = index * data.shape[0]
+        end = start + data.shape[0]
+        full_data[start:end, :] = data
+        if labels is not None:
+            full_labels[start:end] = labels[:, klass_num]
 
-
-def vectorizers(vectzers):
-
-    def vectorize(generator, X, Y, num_chunks, klass_num=None,
-                  batch_size=1000, skip_labels=False):
-        data_len, index = 0, 0
-        full_data, full_labels = None, None
-        load_size = 1000
-        assert load_size <= batch_size
-
-        for data in generator(num_chunks, load_size):
-            v, l = to_np_array(vectzers, data, klass_num, skip_labels)
-            if full_data is None:
-                full_data = _get_np_ndarray(
-                    shape=(batch_size, v.shape[1]),
-                    dtype=theano.config.floatX
-                )
-                full_labels = _get_np_array(
-                    shape=(batch_size,),
-                    dtype=theano.config.floatX
-                )
-            data_len += v.shape[0]
-
-            start = index * v.shape[0]
-            end = start + v.shape[0]
-            full_data[start:end, :] = v
-            if l is not None:
-                full_labels[start:end] = l
-
-            done = False
-            if v.shape[0] < load_size:
-                full_data = full_data[:data_len, :]
-                if full_labels is not None:
-                    full_labels = full_labels[:data_len]
-                done = True
-
-            if not done and data_len < batch_size:
-                continue
-
-            X.set_value(full_data, borrow=True)
+        done = False
+        # 1000 == batch_size in save.XXX
+        if data.shape[0] < 1000:
+            full_data = full_data[:data_len, :]
             if full_labels is not None:
-                Y.set_value(full_labels, borrow=True)
+                full_labels = full_labels[:data_len]
+            done = True
 
-            yield data_len
+        if not done and data_len < batch_size:
+            continue
 
-            full_data, full_labels = None, None
-            data_len, index = 0, 0
+        X.set_value(full_data, borrow=True)
+        if labels is not None:
+            Y.set_value(full_labels, borrow=True)
 
-    return vectorize
+        yield data.shape[0]
 
 
 def run():
@@ -352,10 +292,6 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
     :param batch_size: the size of a minibatch
     """
 
-    for data, labels in save.load_train_vectors(4, 5000):
-        print(type(data), type(labels))
-    raise
-
     total_size = 0
 
     # datasets = load_data('mnist.pkl.gz')
@@ -383,18 +319,17 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
     train_chunks = 1
     validate_chunks = 1
     test_chunks = 1
-    v = load.load_vectorizers(train_chunks)
 
     train_len = 0
-    for data in load.gen_train(train_chunks):
+    for data, _ in save.train(train_chunks):
         train_len += len(data)
 
     validate_len = 0
-    for data in load.gen_validate(validate_chunks):
+    for data, _ in save.validate(validate_chunks):
         validate_len += len(data)
 
     test_len = 0
-    for data in load.gen_test(test_chunks):
+    for data, _ in save.test(test_chunks):
         test_len += len(data)
 
     print('train size: {}'.format(train_len))
@@ -412,10 +347,7 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
     # print_sizes(load.gen_test, 'test')
     # print_sizes(load.gen_submission, 'submission')
 
-    gen = vectorizers(v)
-
-    for _ in gen(load.gen_train, train_set_x, train_set_y, train_chunks,
-                 skip_labels=True):
+    for _ in vectorize(save.train, train_set_x, train_set_y, train_chunks, 0):
         break
     input_size = train_set_x.get_value(borrow=True).shape[1]
 
@@ -524,9 +456,9 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
             # go through the training set
             c = []
 
-            for row_len in gen(
-                    load.gen_train, train_set_x, train_set_y, train_chunks,
-                    skip_labels=True):
+            for row_len in vectorize(
+                    save.train, train_set_x, train_set_y, train_chunks, 0
+                ):
                 if epoch == 0:
                     total_size += row_len
 
@@ -606,8 +538,9 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
             epoch = epoch + 1
             idx = 0
             while idx < n_train_batches:
-                for _ in gen(load.gen_train, train_set_x, train_set_y,
-                             train_chunks, klass_num):
+                for _ in vectorize(
+                        save.train, train_set_x, train_set_y, train_chunks,
+                        klass_num):
                     row_len = train_set_x.get_value(borrow=True).shape[0]
                     sub_train_batches = row_len / settings['batch_size']
 
@@ -619,8 +552,8 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
                     if (itr + 1) % validation_frequency == 0:
 
                         validation_losses = validate_model(
-                            gen(load.gen_validate, valid_set_x, valid_set_y,
-                                validate_chunks, klass_num)
+                            vectorize(save.validate, valid_set_x, valid_set_y,
+                                      validate_chunks, klass_num)
                         )
                         this_validation_loss = numpy.mean(validation_losses)
                         print(
@@ -649,8 +582,8 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
 
                             # test it on the test set
                             test_losses = test_model(
-                                gen(load.gen_test, test_set_x, test_set_y,
-                                    test_chunks, klass_num)
+                                vectorize(save.test, test_set_x, test_set_y,
+                                          test_chunks, klass_num)
                             )
                             test_score = numpy.mean(test_losses)
                             print(('     epoch %i, minibatch %i/%i, test error of '

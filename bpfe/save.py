@@ -62,7 +62,7 @@ def to_np_array(vectzers, data):
 
 def vectorizers(vectzers):
 
-    def vectorize(generator, num_chunks, batch_size=1000):
+    def vectorize(generator, num_chunks, batch_size):
         data_len, index = 0, 0
         full_data, full_labels = None, None
         load_size = 1000
@@ -105,22 +105,51 @@ def vectorizers(vectzers):
     return vectorize
 
 
-def _save_train_vectors(num_chunks, batch_size):
+def train(num_chunks):
+    return _load_vectors('train', num_chunks)
+
+
+def validate(num_chunks):
+    return _load_vectors('validate', num_chunks)
+
+
+def test(num_chunks):
+    return _load_vectors('test', num_chunks)
+
+
+def submission(num_chunks):
+    return _load_vectors('submission', num_chunks)
+
+
+def _save_vectors(name, num_chunks):
+    batch_size = 1000
     v = load.load_vectorizers(num_chunks)
     gen = vectorizers(v)
 
-    fname = 'data/train-vec-{}-{}.pkl.gz'.format(num_chunks, batch_size)
+    if name == 'train':
+        loader = load.gen_train
+    elif name == 'validate':
+        loader = load.gen_validate
+    elif name == 'test':
+        loader = load.gen_test
+    elif name == 'submission':
+        loader = load.gen_submission
+    else:
+        raise Exception('unexpected name {}'.format(name))
+
+    fname = 'data/{}-vec-{}-{}.pkl.gz'.format(name, num_chunks, batch_size)
     with gzip.open(fname, 'wb') as ifile:
-        for data, labels in gen(load.gen_train, num_chunks, batch_size):
+        for data, labels in gen(loader, num_chunks, batch_size):
             extra_bits = 8 - (data.shape[1] % 8)
             data = np.packbits(data, axis=1)
             pickle.dump((extra_bits, data, labels), ifile)
 
 
-def load_train_vectors(num_chunks, batch_size):
-    fname = 'data/train-vec-{}-{}.pkl.gz'.format(num_chunks, batch_size)
+def _load_vectors(name, num_chunks):
+    batch_size = 1000
+    fname = 'data/{}-vec-{}-{}.pkl.gz'.format(name, num_chunks, batch_size)
     if not os.path.exists(fname):
-        _save_train_vectors(num_chunks, batch_size)
+        _save_vectors(name, num_chunks)
 
     with gzip.open(fname, 'rb') as ifile:
         while True:
