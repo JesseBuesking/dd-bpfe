@@ -3,7 +3,9 @@
 from nltk import word_tokenize
 from nltk.corpus import stopwords
 from nltk.tokenize import RegexpTokenizer
+import sys
 from bpfe.text_to_vec import TextVectorizer, BinaryVectorizer
+import numpy as np
 
 
 remove_punc_keep_hyph_tokenizer = RegexpTokenizer(r'\w+(-\w+)*')
@@ -74,61 +76,53 @@ def get_vectorizers(num_chunks):
     for attr in text_attributes:
         v[attr] = text_vectorizer(num_chunks, attr)
 
-    v['fte'] = bucket_vectorizer(num_chunks, 'fte', [
-        (None, 0.0),
-        (0.0, 5.0),
-        (5.0, 10.0),
-        (10.0, 15.0),
-        (15.0, 20.0),
-        (20.0, 25.0),
-        (25.0, 30.0),
-        (30.0, 35.0),
-        (35.0, 40.0),
-        (40.0, 45.0),
-        (45.0, 50.0),
-        (50.0, 55.0),
-        (55.0, 60.0),
-        (60.0, 65.0),
-        (65.0, 70.0),
-        (70.0, 75.0),
-        (75.0, 80.0),
-        (80.0, 85.0),
-        (85.0, 90.0),
-        (90.0, 95.0),
-        # i want 100% to be included, otherwise it gets lumped with the
-        # garbage above 100
-        (95.0, 100.001),
-        (100.001, None),
-    ])
+    # i want 100% to be included, otherwise it gets lumped with the garbage
+    # above 100, so append 100.01)
+    fte_buckets = np.concatenate((np.arange(0, 105, 5), [100.01]), axis=1)
+    fte_buckets /= 100.0
+    fte_buckets = np.concatenate((
+        [-sys.maxint],
+        fte_buckets,
+        [sys.maxint]
+    ), axis=1)
 
-    v['total'] = bucket_vectorizer(num_chunks, 'total', [
-        (None, 0),
-        (0, 5000),
-        (5000, 10000),
-        (10000, 15000),
-        (15000, 20000),
-        (20000, 25000),
-        (25000, 30000),
-        (30000, 35000),
-        (35000, 40000),
-        (40000, 45000),
-        (45000, 50000),
-        (50000, 55000),
-        (55000, 60000),
-        (60000, 65000),
-        (65000, 70000),
-        (70000, 75000),
-        (75000, 80000),
-        (80000, 85000),
-        (85000, 90000),
-        (90000, 95000),
-        (95000, 100000),
-        (100000, 105000),
-        (105000, 110000),
-        (110000, 115000),
-        (115000, 120000),
-        (120000, None),
-    ])
+    v['fte'] = bucket_vectorizer(num_chunks, 'fte', fte_buckets)
+    # [
+    #     (None, 0.0),
+    #     (0.0, 5.0),
+    #     (5.0, 10.0),
+    #     (10.0, 15.0),
+    #     (15.0, 20.0),
+    #     (20.0, 25.0),
+    #     (25.0, 30.0),
+    #     (30.0, 35.0),
+    #     (35.0, 40.0),
+    #     (40.0, 45.0),
+    #     (45.0, 50.0),
+    #     (50.0, 55.0),
+    #     (55.0, 60.0),
+    #     (60.0, 65.0),
+    #     (65.0, 70.0),
+    #     (70.0, 75.0),
+    #     (75.0, 80.0),
+    #     (80.0, 85.0),
+    #     (85.0, 90.0),
+    #     (90.0, 95.0),
+    #     # i want 100% to be included, otherwise it gets lumped with the
+    #     # garbage above 100
+    #     (95.0, 100.001),
+    #     (100.001, None),
+    # ])
+
+    total_buckets = np.arange(0, 125000, 5000)
+    total_buckets /= 100.0
+    total_buckets = np.concatenate((
+        [-sys.maxint],
+        total_buckets,
+        [sys.maxint]
+    ), axis=1)
+
+    v['total'] = bucket_vectorizer(num_chunks, 'total', total_buckets)
 
     return v
 
@@ -166,25 +160,17 @@ def text_vectorizer(num_chunks, attr):
 def _bucket_vectorizer_prep(value, buckets):
     # noinspection PyBroadException
     try:
+        if value == '':
+            return 0
         value = float(value)
     except:
         return 0
 
-    value *= 100
-
-    idx = 1
-    for mini, maxi in buckets:
-        if mini is None and value < maxi:
-            return idx
-        elif maxi is None and mini <= value:
-            return idx
-        elif mini <= value < maxi:
-            return idx
-        idx += 1
+    return np.argmax(buckets > value)
 
 
-def bucket_vectorizer_transform(v, values, buckets):
-    return v.transform(_bucket_vectorizer_prep(values, buckets))
+def bucket_vectorizer_transform(v, value, buckets):
+    return v.transform(_bucket_vectorizer_prep(value, buckets))
 
 
 def bucket_vectorizer(num_chunks, attr, buckets):

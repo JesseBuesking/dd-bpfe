@@ -28,7 +28,7 @@ class BinaryVectorizer(object):
                     self.max_idx += 1
 
     def transform(self, value):
-        ret = np.zeros((1, self.max_idx))
+        ret = np.zeros((1, self.max_idx), dtype=np.int32)
         for n in self.normalizer(value):
             idx = self.value_indices[n]
             ret[0, idx] = 1

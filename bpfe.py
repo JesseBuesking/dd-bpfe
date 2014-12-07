@@ -3,15 +3,16 @@
 import os
 from os.path import dirname
 import sys
-import math
 import time
 import theano
 from theano.tensor.shared_randomstreams import RandomStreams
-from bpfe import scoring, feature_engineering
+from bpfe import scoring, feature_engineering, save
 from bpfe.config import FLAT_LABELS, KLASS_LABEL_INFO
-from bpfe.dl_dbn.logistic_sgd import load_data
 from bpfe.dl_dbn.DBN import DBN
 import numpy
+from bpfe.feature_engineering import _bucket_vectorizer_prep, \
+    _text_vectorizer_prep, bucket_vectorizer, text_vectorizer, \
+    bucket_vectorizer_transform, text_vectorizer_transform
 import bpfe.load as load
 from bpfe.models.perceptron_model import PerceptronModel
 import numpy as np
@@ -20,6 +21,7 @@ try:
     import cPickle as pickle
 except:
     import pickle
+# from memory_profiler import profile
 
 
 # SEED = random.randint(1, sys.maxint)
@@ -34,9 +36,33 @@ filename = '{}-{}'.format(AMT, ITERATIONS)
 loc += '/' + filename
 
 
+NP_NDARRAY = None
+NP_ARRAY = None
 
-def vectorizers(vectzers, dtype=theano.config.floatX):
 
+def _get_np_ndarray(shape, dtype):
+    global NP_NDARRAY
+    if not NP_NDARRAY is None and \
+       NP_NDARRAY.shape == shape and \
+       NP_NDARRAY.dtype == dtype:
+        return NP_NDARRAY
+
+    NP_NDARRAY = np.empty(shape, dtype, order='C')
+    return NP_NDARRAY
+
+
+def _get_np_array(shape, dtype):
+    global NP_ARRAY
+    if not NP_ARRAY is None and \
+       NP_ARRAY.shape == shape and \
+       NP_ARRAY.dtype == dtype:
+        return NP_ARRAY
+
+    NP_ARRAY = np.empty(shape, dtype, order='C')
+    return NP_ARRAY
+
+
+def to_np_array(vectzers, data, klass_num, skip_labels=False):
     attributes = [
         'object_description', 'program_description',
         'subfund_description', 'job_title_description',
@@ -45,47 +71,95 @@ def vectorizers(vectzers, dtype=theano.config.floatX):
         'text_4', 'total', 'text_2', 'text_3', 'fund_description', 'text_1'
     ]
 
-    def vectorize(generator, X, Y, num_chunks, klass_num=None, batch_size=1000,
-                  skip_labels=False):
-        for data in generator(num_chunks):
-            total_size = len(data)
-            batches = int(math.ceil(total_size / batch_size))
-            for i in range(batches):
-                sub_data = data[int(i*batch_size): int((i+1)*batch_size)]
-                vecs = []
-                for d, _ in sub_data:
-                    avecs = []
-                    for attr in attributes:
-                        v, settings, method_name = vectzers[attr]
-                        m = getattr(feature_engineering, method_name)
-                        avec = m(v, getattr(d, attr), settings)
-                        avecs.append(avec)
+    vecs = []
+    for d, _ in data:
+        avecs = []
+        for attr in attributes:
+            v, settings, method_name = vectzers[attr]
+            if attr in {'fte', 'total'}:
+                avec = bucket_vectorizer_transform(v, getattr(d, attr), settings)
+            else:
+                avec = text_vectorizer_transform(v, getattr(d, attr), settings)
 
-                    vecs.append(np.concatenate(avecs, axis=1)[0])
+            m = getattr(feature_engineering, method_name)
+            avec = m(v, getattr(d, attr), settings)
+            avecs.append(avec)
 
-                try:
-                    vecs = np.array(vecs, dtype=dtype)
-                except:
-                    print(vecs.shape, i)
-                    raise
+        vecs.append(np.concatenate(avecs, axis=1)[0])
 
-                if not skip_labels:
-                    labels = []
-                    for _, label in sub_data:
-                        if label is None:
-                            break
+    try:
+        # noinspection PyUnresolvedReferences
+        vecs = np.array(vecs, dtype=theano.config.floatX)
+    except:
+        if isinstance(vecs, list):
+            print(len(vecs))
+        else:
+            print(vecs.shape)
+        raise
 
-                        labels.append(label.to_klass_num(klass_num))
+    if not skip_labels:
+        labels = []
+        for _, label in data:
+            if label is None:
+                break
 
-                    if len(labels) > 0:
-                        labels = np.array(labels, dtype=dtype)
-                else:
-                    labels = None
+            labels.append(label.to_klass_num(klass_num))
 
-                X.set_value(vecs, borrow=True)
-                Y.set_value(labels, borrow=True)
+        if len(labels) > 0:
+            # noinspection PyUnresolvedReferences
+            labels = np.array(labels, dtype=theano.config.floatX)
+    else:
+        labels = None
 
-                yield vecs, labels
+    return vecs, labels
+
+
+def vectorizers(vectzers):
+
+    def vectorize(generator, X, Y, num_chunks, klass_num=None,
+                  batch_size=1000, skip_labels=False):
+        data_len, index = 0, 0
+        full_data, full_labels = None, None
+        load_size = 1000
+        assert load_size <= batch_size
+
+        for data in generator(num_chunks, load_size):
+            v, l = to_np_array(vectzers, data, klass_num, skip_labels)
+            if full_data is None:
+                full_data = _get_np_ndarray(
+                    shape=(batch_size, v.shape[1]),
+                    dtype=theano.config.floatX
+                )
+                full_labels = _get_np_array(
+                    shape=(batch_size,),
+                    dtype=theano.config.floatX
+                )
+            data_len += v.shape[0]
+
+            start = index * v.shape[0]
+            end = start + v.shape[0]
+            full_data[start:end, :] = v
+            if l is not None:
+                full_labels[start:end] = l
+
+            done = False
+            if v.shape[0] < load_size:
+                full_data = full_data[:data_len, :]
+                if full_labels is not None:
+                    full_labels = full_labels[:data_len]
+                done = True
+
+            if not done and data_len < batch_size:
+                continue
+
+            X.set_value(full_data, borrow=True)
+            if full_labels is not None:
+                Y.set_value(full_labels, borrow=True)
+
+            yield data_len
+
+            full_data, full_labels = None, None
+            data_len, index = 0, 0
 
     return vectorize
 
@@ -207,14 +281,63 @@ def stats():
     pm.print_scores()
 
 
-def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
-             pretrain_lr=0.01, k=1, training_epochs=1000,
-             dataset='mnist.pkl.gz', batch_size=5):
+def test_DBN():
+    """ """
+    # k_opts = [1, 5, 10]
+    # hidden_layer_depth_opts = [3, 4]
+    # batch_size_opts = [10, 5, 1]
+    # hidden_layer_size_opts = [500]
+    # pretrain_lr_opts = [0.01, 0.001]
+    # finetune_lr_opts = [0.1, 0.01]
+
+    k_opts = [1]
+    hidden_layer_depth_opts = [2]
+    batch_size_opts = [10]
+    hidden_layer_size_opts = [50]
+    pretrain_lr_opts = [0.01]
+    finetune_lr_opts = [0.01]
+    combos = []
+    for ko in k_opts:
+        for hldo in hidden_layer_depth_opts:
+            for bso in batch_size_opts:
+                for hlso in hidden_layer_size_opts:
+                    for plo in pretrain_lr_opts:
+                        for flo in finetune_lr_opts:
+                            combos.append((ko, bso, hlso, hldo, flo, plo))
+    for ko, bso, hlso, hldo, flo, plo in combos:
+        hls = [hlso for _ in range(hldo)]
+        start = time.clock()
+        _run_with_params(
+            finetune_lr=flo,
+            pretraining_epochs=1,
+            pretrain_lr=plo,
+            k=ko,
+            training_epochs=1,
+            batch_size=bso,
+            hidden_layer_sizes=hls
+        )
+        print('DURATION: {}'.format(time.clock() - start))
+
+    # settings_stats_fname = 'data/settings_stats.pkl'
+    # if os.path.exists(settings_stats_fname):
+    #     with open(settings_stats_fname, 'rb') as ifile:
+    #         settings_stats = pickle.load(ifile)
+    #         for klass, all_stats in settings_stats.items():
+    #             all_stats.sort(key=lambda x: x[3], reverse=True)
+    #
+    #             print('for {}:'.format(klass))
+    #             for ind, stats in enumerate(all_stats):
+    #                 settings_key = ', '.join([
+    #                     str(k) + ': ' + str(v) for k, v in stats[0].items()
+    #                 ])
+    #                 print('\t{}: {}, {} for [{}]'.format(
+    #                     ind, stats[3], stats[1], settings_key
+    #                 ))
+
+
+def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
+                     training_epochs, batch_size, hidden_layer_sizes):
     """
-    Demonstrates how to train and test a Deep Belief Network.
-
-    This is demonstrated on MNIST.
-
     :type finetune_lr: float
     :param finetune_lr: learning rate used in the finetune stage
     :type pretraining_epochs: int
@@ -225,18 +348,37 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
     :param k: number of Gibbs steps in CD/PCD
     :type training_epochs: int
     :param training_epochs: maximal number of iterations ot run the optimizer
-    :type dataset: string
-    :param dataset: path the the pickled dataset
     :type batch_size: int
     :param batch_size: the size of a minibatch
     """
-    batch_size = 5
-    pretraining_epochs = 1
-    training_epochs = 1
+
+    for data, labels in save.load_train_vectors(4, 5000):
+        print(type(data), type(labels))
+    raise
 
     total_size = 0
 
-    datasets = load_data(dataset)
+    # datasets = load_data('mnist.pkl.gz')
+
+    def shared_dataset():
+        shared_x = theano.shared(
+            numpy.asarray([[]], dtype=theano.config.floatX),
+            borrow=True
+        )
+        shared_y = theano.shared(
+            numpy.asarray([], dtype=theano.config.floatX),
+            borrow=True
+        )
+        return shared_x, shared_y
+
+    test_set_x, test_set_y = shared_dataset()
+    valid_set_x, valid_set_y = shared_dataset()
+    train_set_x, train_set_y = shared_dataset()
+    datasets = [
+        (train_set_x, train_set_y),
+        (valid_set_x, valid_set_y),
+        (test_set_x, test_set_y)
+    ]
 
     train_chunks = 1
     validate_chunks = 1
@@ -272,10 +414,6 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
 
     gen = vectorizers(v)
 
-    train_set_x, train_set_y = datasets[0]
-    valid_set_x, valid_set_y = datasets[1]
-    test_set_x, test_set_y = datasets[2]
-
     for _ in gen(load.gen_train, train_set_x, train_set_y, train_chunks,
                  skip_labels=True):
         break
@@ -296,7 +434,9 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
         'finetune_lr': finetune_lr,
         'train_chunks': train_chunks,
         'validate_chunks': validate_chunks,
-        'test_chunks': test_chunks
+        'test_chunks': test_chunks,
+        'hidden_layer_sizes': '_'.join([str(z) for z in hidden_layer_sizes]),
+        'training_epochs': training_epochs
     }
 
     def settings_name(s):
@@ -306,18 +446,25 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
 
     current_settings_key = settings_name(settings)
 
-    already_ran = False
-    a_class = KLASS_LABEL_INFO.keys()[0]
-    if a_class in settings_stats:
-        for data in settings_stats[a_class]:
-            data_settings_key = settings_name(data[0])
-            if data_settings_key == current_settings_key:
-                already_ran = True
+    # already_ran = False
+    # a_class = KLASS_LABEL_INFO.keys()[0]
+    # if a_class in settings_stats:
+    #     for data in settings_stats[a_class]:
+    #         data_settings_key = settings_name(data[0])
+    #         if data_settings_key == current_settings_key:
+    #             already_ran = True
+    #
+    # if already_ran:
+    #     return
 
-    if already_ran:
-        return
-
-    settings_values = settings.values()
+    file_key = {
+        'k': k,
+        'batch_size': batch_size,
+        'pretrain_lr': pretrain_lr,
+        'finetune_lr': 0.1,
+        'hidden_layer_sizes': str(hidden_layer_sizes[0])
+    }
+    settings_values = sorted(file_key.values(), key=lambda x: x)
 
     print('input size: {}'.format(input_size))
 
@@ -330,7 +477,7 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
     # construct the Deep Belief Network
     dbn = DBN(
         n_ins=input_size,
-        hidden_layers_sizes=[1000, 1000, 1000],
+        hidden_layers_sizes=hidden_layer_sizes,
         n_outs=104
     )
 
@@ -343,7 +490,6 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
     start_time = time.clock()
     ## Pre-train layer-wise
     for i in xrange(dbn.n_layers):
-        dbn.hidden_layer_sizes[i] = 1000
         rbm_info = [
             i,
             dbn.hidden_layer_sizes[i]
@@ -351,15 +497,16 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
         filename = 'data/hidden_layers/{}.pkl'.format(
             '-'.join([str(s) for s in rbm_info])
         )
-        if os.path.exists(filename):
-            print('layer {} already exists on disk, loading ...'.format(i))
-            with open(filename, 'rb') as ifile:
-                data = pickle.load(ifile)
-                dbn = data[0]
-                total_size = data[1]
-                numpy_rng = data[2]
-                theano_rng = data[3]
-                continue
+        # if os.path.exists(filename):
+        #     print('layer {} already exists on disk, loading ...'.format(i))
+        #     with open(filename, 'rb') as ifile:
+        #         data = pickle.load(ifile)
+        #         dbn = data[0]
+        #         dbn.hidden_layer_sizes = hidden_layer_sizes
+        #         total_size = data[1]
+        #         numpy_rng = data[2]
+        #         theano_rng = data[3]
+        #         continue
 
         print('getting the pre-training function for layer {} ...'.format(i))
         pretraining_fn = dbn.pretraining_function(
@@ -377,9 +524,9 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
             # go through the training set
             c = []
 
-            for data, labels in gen(load.gen_train, train_set_x, train_set_y,
-                                    train_chunks, skip_labels=True):
-                row_len = train_set_x.get_value(borrow=True).shape[0]
+            for row_len in gen(
+                    load.gen_train, train_set_x, train_set_y, train_chunks,
+                    skip_labels=True):
                 if epoch == 0:
                     total_size += row_len
 
@@ -412,11 +559,16 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
     # FINETUNING THE MODEL #
     ########################
 
-    with open('data/current-dbn.pkl', 'wb') as ifile:
-        pickle.dump(dbn, ifile)
+    # TODO since we're running a single class....
+    # with open('data/current-dbn.pkl', 'wb') as ifile:
+    #     pickle.dump(dbn, ifile)
     for klass, (klass_num, count) in KLASS_LABEL_INFO.items():
-        with open('data/current-dbn.pkl', 'rb') as ifile:
-            dbn = pickle.load(ifile)
+        if klass != 'Function':
+            continue
+
+        # TODO since we're running a single class....
+        # with open('data/current-dbn.pkl', 'rb') as ifile:
+        #     dbn = pickle.load(ifile)
 
         dbn.number_of_outputs = count
         dbn.create_output_layer()
@@ -544,22 +696,10 @@ def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
             if data_settings_key == current_settings_key:
                 break
 
-        settings_stats[klass].append(stats)
-
-        with open(settings_stats_fname, 'wb') as ifile:
-            pickle.dump(settings_stats, ifile)
-
-    for klass, all_stats in settings_stats.items():
-        all_stats.sort(key=lambda x: x[3], reverse=True)
-
-        print('for {}:'.format(klass))
-        for ind, stats in enumerate(all_stats):
-            settings_key = ', '.join([
-                str(k) + ': ' + str(v) for k, v in stats[0].items()
-            ])
-            print('\t{}: {}, {} for [{}]'.format(
-                ind, stats[3], stats[1], settings_key
-            ))
+        # settings_stats[klass].append(stats)
+        #
+        # with open(settings_stats_fname, 'wb') as ifile:
+        #     pickle.dump(settings_stats, ifile)
 
 
 if __name__ == '__main__':

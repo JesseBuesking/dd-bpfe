@@ -102,37 +102,58 @@ def store_raw(seed=1, verbose=False):
     store_in_chunks(train, 'train')
 
 
-def gen_validate(num_chunks=None):
-    for data in _gen_name('validate', num_chunks):
+def gen_validate(num_chunks=None, batch_size=None):
+    for data in _gen_name('validate', num_chunks, batch_size):
         yield data
 
 
-def gen_test(num_chunks=None):
-    for data in _gen_name('test', num_chunks):
+def gen_test(num_chunks=None, batch_size=None):
+    for data in _gen_name('test', num_chunks, batch_size):
         yield data
 
 
-def gen_train(num_chunks=None):
-    for data in _gen_name('train', num_chunks):
+def gen_train(num_chunks=None, batch_size=None):
+    for data in _gen_name('train', num_chunks, batch_size):
+            yield data
+
+
+def gen_submission(num_chunks=None, batch_size=None):
+    for data in _gen_name('submission', num_chunks, batch_size):
         yield data
 
 
-def gen_submission(num_chunks=None):
-    for data in _gen_name('submission', num_chunks):
-        yield data
-
-
-def _gen_name(name, num_chunks=None):
+def _gen_name(name, num_chunks=None, batch_size=None):
     if num_chunks is None:
         num_chunks = sys.maxint
 
+    if batch_size is None:
+        batch_size = sys.maxint
+
     with open('data/raw-{}.pkl'.format(name), 'rb') as datafile:
         chunks = pickle.load(datafile)
+        data = []
         for i in range(chunks):
             if i >= num_chunks:
                 break
 
-            yield pickle.load(datafile)
+            data += pickle.load(datafile)
+            total_size = len(data)
+
+            if batch_size > total_size:
+                continue
+
+            batches = int(math.ceil(total_size / float(batch_size)))
+            if batches > 1:
+                for j in range(batches):
+                    sub_data = data[int(j*batch_size): int((j+1)*batch_size)]
+                    yield sub_data
+            else:
+                yield data
+
+            data = []
+
+        if len(data) > 0:
+            yield data
 
 
 def load_vectorizers(num_chunks):
