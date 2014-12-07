@@ -122,7 +122,7 @@ def submission(num_chunks):
 
 
 def _save_vectors(name, num_chunks):
-    batch_size = 1000
+    batch_size = 5000
 
     if name == 'train':
         loader = load.gen_train
@@ -146,7 +146,7 @@ def _save_vectors(name, num_chunks):
 
 
 def _load_vectors(name, num_chunks):
-    batch_size = 1000
+    batch_size = 5000
     fname = 'data/{}-vec-{}-{}-{}.pkl.gz'.format(
         name, batch_size, num_chunks, TRAIN_CHUNKS
     )

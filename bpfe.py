@@ -83,8 +83,8 @@ def vectorize(generator, X, Y, num_chunks, klass_num):
             full_labels[start:end] = labels[:, klass_num]
 
         done = False
-        # 1000 == batch_size in save.XXX
-        if data.shape[0] < 1000:
+        # 5000 == batch_size in save.XXX
+        if data.shape[0] < 5000:
             full_data = full_data[:data_len, :]
             if full_labels is not None:
                 full_labels = full_labels[:data_len]
@@ -101,6 +101,13 @@ def vectorize(generator, X, Y, num_chunks, klass_num):
 
         full_data, full_labels = None, None
         data_len = 0
+
+    if full_data is not None:
+        X.set_value(full_data, borrow=True)
+        if full_labels is not None:
+            Y.set_value(full_labels, borrow=True)
+
+        yield data_len
 
 
 def run():
@@ -223,11 +230,11 @@ def stats():
 def test_DBN():
     """ """
     # k_opts = [1, 5, 10]
-    # hidden_layer_depth_opts = [3, 4]
     # batch_size_opts = [10, 5, 1]
     # hidden_layer_size_opts = [500]
     # pretrain_lr_opts = [0.01, 0.001]
     # finetune_lr_opts = [0.1, 0.01]
+    # hidden_layer_depth_opts = [3, 4]
 
     k_opts = [1]
     hidden_layer_depth_opts = [3]
@@ -237,11 +244,11 @@ def test_DBN():
     finetune_lr_opts = [0.01]
     combos = []
     for ko in k_opts:
-        for hldo in hidden_layer_depth_opts:
-            for bso in batch_size_opts:
-                for hlso in hidden_layer_size_opts:
-                    for plo in pretrain_lr_opts:
-                        for flo in finetune_lr_opts:
+        for bso in batch_size_opts:
+            for hlso in hidden_layer_size_opts:
+                for plo in pretrain_lr_opts:
+                    for flo in finetune_lr_opts:
+                        for hldo in hidden_layer_depth_opts:
                             combos.append((ko, bso, hlso, hldo, flo, plo))
     for ko, bso, hlso, hldo, flo, plo in combos:
         hls = [hlso for _ in range(hldo)]
@@ -257,24 +264,23 @@ def test_DBN():
         )
         print('DURATION: {}'.format(time.clock() - start))
 
-    # settings_stats_fname = 'data/settings_stats.pkl'
-    # if os.path.exists(settings_stats_fname):
-    #     with open(settings_stats_fname, 'rb') as ifile:
-    #         settings_stats = pickle.load(ifile)
-    #         for klass, all_stats in settings_stats.items():
-    #             all_stats.sort(key=lambda x: x[3], reverse=True)
-    #
-    #             print('for {}:'.format(klass))
-    #             for ind, stats in enumerate(all_stats):
-    #                 settings_key = ', '.join([
-    #                     str(k) + ': ' + str(v) for k, v in stats[0].items()
-    #                 ])
-    #                 print('\t{}: {}, {} for [{}]'.format(
-    #                     ind, stats[3], stats[1], settings_key
-    #                 ))
+    settings_stats_fname = 'data/settings_stats.pkl'
+    if os.path.exists(settings_stats_fname):
+        with open(settings_stats_fname, 'rb') as ifile:
+            settings_stats = pickle.load(ifile)
+            for klass, all_stats in settings_stats.items():
+                all_stats.sort(key=lambda x: x[3], reverse=True)
+
+                print('for {}:'.format(klass))
+                for ind, stats in enumerate(all_stats):
+                    settings_key = ', '.join([
+                        str(k) + ': ' + str(v) for k, v in stats[0].items()
+                    ])
+                    print('\t{}: {}, {} for [{}]'.format(
+                        ind, stats[3], stats[1], settings_key
+                    ))
 
 
-# @profile
 def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
                      training_epochs, batch_size, hidden_layer_sizes):
     """
@@ -294,13 +300,13 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
 
     total_size = 0
 
-    # datasets = load_data('mnist.pkl.gz')
-
     def shared_dataset():
+        # noinspection PyUnresolvedReferences
         shared_x = theano.shared(
             numpy.asarray([[]], dtype=theano.config.floatX),
             borrow=True
         )
+        # noinspection PyUnresolvedReferences
         shared_y = theano.shared(
             numpy.asarray([], dtype=theano.config.floatX),
             borrow=True
@@ -320,21 +326,21 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
     validate_chunks = 1
     test_chunks = 1
 
-    train_len = 0
-    for data, _ in save.train(train_chunks):
-        train_len += len(data)
-
-    validate_len = 0
-    for data, _ in save.validate(validate_chunks):
-        validate_len += len(data)
-
-    test_len = 0
-    for data, _ in save.test(test_chunks):
-        test_len += len(data)
-
-    print('train size: {}'.format(train_len))
-    print('validate size: {}'.format(validate_len))
-    print('test size: {}'.format(test_len))
+    # train_len = 0
+    # for data, _ in save.train(train_chunks):
+    #     train_len += len(data)
+    #
+    # validate_len = 0
+    # for data, _ in save.validate(validate_chunks):
+    #     validate_len += len(data)
+    #
+    # test_len = 0
+    # for data, _ in save.test(test_chunks):
+    #     test_len += len(data)
+    #
+    # print('train size: {}'.format(train_len))
+    # print('validate size: {}'.format(validate_len))
+    # print('test size: {}'.format(test_len))
 
     # def print_sizes(gen, name):
     #     total_size = 0
@@ -378,22 +384,21 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
 
     current_settings_key = settings_name(settings)
 
-    # already_ran = False
-    # a_class = KLASS_LABEL_INFO.keys()[0]
-    # if a_class in settings_stats:
-    #     for data in settings_stats[a_class]:
-    #         data_settings_key = settings_name(data[0])
-    #         if data_settings_key == current_settings_key:
-    #             already_ran = True
-    #
-    # if already_ran:
-    #     return
+    already_ran = False
+    a_class = KLASS_LABEL_INFO.keys()[0]
+    if a_class in settings_stats:
+        for data in settings_stats[a_class]:
+            data_settings_key = settings_name(data[0])
+            if data_settings_key == current_settings_key:
+                already_ran = True
+
+    if already_ran:
+        return
 
     file_key = {
         'k': k,
         'batch_size': batch_size,
         'pretrain_lr': pretrain_lr,
-        'finetune_lr': 0.1,
         'hidden_layer_sizes': str(hidden_layer_sizes[0])
     }
     settings_values = sorted(file_key.values(), key=lambda x: x)
@@ -429,16 +434,16 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
         filename = 'data/hidden_layers/{}.pkl'.format(
             '-'.join([str(s) for s in rbm_info])
         )
-        # if os.path.exists(filename):
-        #     print('layer {} already exists on disk, loading ...'.format(i))
-        #     with open(filename, 'rb') as ifile:
-        #         data = pickle.load(ifile)
-        #         dbn = data[0]
-        #         dbn.hidden_layer_sizes = hidden_layer_sizes
-        #         total_size = data[1]
-        #         numpy_rng = data[2]
-        #         theano_rng = data[3]
-        #         continue
+        if os.path.exists(filename):
+            print('layer {} already exists on disk, loading ...'.format(i))
+            with open(filename, 'rb') as ifile:
+                data = pickle.load(ifile)
+                dbn = data[0]
+                dbn.hidden_layer_sizes = hidden_layer_sizes
+                total_size = data[1]
+                numpy_rng = data[2]
+                theano_rng = data[3]
+                continue
 
         print('getting the pre-training function for layer {} ...'.format(i))
         pretraining_fn = dbn.pretraining_function(
@@ -457,8 +462,7 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
             c = []
 
             for row_len in vectorize(
-                    save.train, train_set_x, train_set_y, train_chunks, 0
-                ):
+                    save.train, train_set_x, train_set_y, train_chunks, 0):
                 if epoch == 0:
                     total_size += row_len
 
@@ -481,6 +485,7 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
             pickle.dump(data, ifile)
 
     total_size /= dbn.n_layers
+    # print('ts', total_size)
 
     end_time = time.clock()
     # end-snippet-2
@@ -516,6 +521,7 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
         print '... finetuning the model'
         # early-stopping parameters
         n_train_batches = total_size / settings['batch_size']
+        # print('tb', n_train_batches)
         patience = 4 * n_train_batches  # look as this many examples regardless
         # go through this many
         # minibatches before checking the network
@@ -538,10 +544,9 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
             epoch = epoch + 1
             idx = 0
             while idx < n_train_batches:
-                for _ in vectorize(
+                for row_len in vectorize(
                         save.train, train_set_x, train_set_y, train_chunks,
                         klass_num):
-                    row_len = train_set_x.get_value(borrow=True).shape[0]
                     sub_train_batches = row_len / settings['batch_size']
 
                     for minibatch_index in xrange(sub_train_batches):
@@ -629,10 +634,10 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
             if data_settings_key == current_settings_key:
                 break
 
-        # settings_stats[klass].append(stats)
-        #
-        # with open(settings_stats_fname, 'wb') as ifile:
-        #     pickle.dump(settings_stats, ifile)
+        settings_stats[klass].append(stats)
+
+        with open(settings_stats_fname, 'wb') as ifile:
+            pickle.dump(settings_stats, ifile)
 
 
 if __name__ == '__main__':
