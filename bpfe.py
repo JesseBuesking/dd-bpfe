@@ -6,13 +6,10 @@ import sys
 import time
 import theano
 from theano.tensor.shared_randomstreams import RandomStreams
-from bpfe import scoring, feature_engineering, save
+from bpfe import scoring, save
 from bpfe.config import FLAT_LABELS, KLASS_LABEL_INFO
 from bpfe.dl_dbn.DBN import DBN
 import numpy
-from bpfe.feature_engineering import _bucket_vectorizer_prep, \
-    _text_vectorizer_prep, bucket_vectorizer, text_vectorizer, \
-    bucket_vectorizer_transform, text_vectorizer_transform
 import bpfe.load as load
 from bpfe.models.perceptron_model import PerceptronModel
 import numpy as np
@@ -63,7 +60,7 @@ def _get_np_array(shape, dtype):
 
 
 def vectorize(generator, X, Y, num_chunks, klass_num):
-    batch_size = 5000
+    batch_size = 1000
     data_len, index = 0, 0
     full_data, full_labels = None, None
     for data, labels in generator(num_chunks):
@@ -101,7 +98,10 @@ def vectorize(generator, X, Y, num_chunks, klass_num):
         if labels is not None:
             Y.set_value(full_labels, borrow=True)
 
-        yield data.shape[0]
+        yield data_len
+
+        full_data, full_labels = None, None
+        data_len = 0
 
 
 def run():
@@ -231,10 +231,10 @@ def test_DBN():
     # finetune_lr_opts = [0.1, 0.01]
 
     k_opts = [1]
-    hidden_layer_depth_opts = [2]
-    batch_size_opts = [10]
+    hidden_layer_depth_opts = [3]
+    batch_size_opts = [5]
     hidden_layer_size_opts = [50]
-    pretrain_lr_opts = [0.01]
+    pretrain_lr_opts = [0.1]
     finetune_lr_opts = [0.01]
     combos = []
     for ko in k_opts:
