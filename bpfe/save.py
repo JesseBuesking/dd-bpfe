@@ -14,6 +14,9 @@ except:
     import pickle
 
 
+TRAIN_CHUNKS = 4
+
+
 def to_np_array(vectzers, data):
     attributes = [
         'object_description', 'program_description',
@@ -60,49 +63,46 @@ def to_np_array(vectzers, data):
     return vecs, labels
 
 
-def vectorizers(vectzers):
+def vectorize(generator, num_chunks, batch_size):
+    vectorizers = load.load_vectorizers(TRAIN_CHUNKS)
+    data_len, index = 0, 0
+    full_data, full_labels = None, None
+    load_size = 1000
+    assert load_size <= batch_size
 
-    def vectorize(generator, num_chunks, batch_size):
-        data_len, index = 0, 0
+    for data in generator(num_chunks, load_size):
+        v, l = to_np_array(vectorizers, data)
+        if full_data is None:
+            full_data = np.ndarray(
+                shape=(batch_size, v.shape[1]),
+                dtype=np.int32
+            )
+            full_labels = np.ndarray(
+                shape=(batch_size, len(KLASS_LABEL_INFO)),
+                dtype=np.int32
+            )
+        data_len += v.shape[0]
+
+        start = index * v.shape[0]
+        end = start + v.shape[0]
+        full_data[start:end, :] = v
+        if l is not None:
+            full_labels[start:end] = l
+
+        done = False
+        if v.shape[0] < load_size:
+            full_data = full_data[:data_len, :]
+            if full_labels is not None:
+                full_labels = full_labels[:data_len]
+            done = True
+
+        if not done and data_len < batch_size:
+            continue
+
+        yield full_data, full_labels
+
         full_data, full_labels = None, None
-        load_size = 1000
-        assert load_size <= batch_size
-
-        for data in generator(num_chunks, load_size):
-            v, l = to_np_array(vectzers, data)
-            if full_data is None:
-                full_data = np.ndarray(
-                    shape=(batch_size, v.shape[1]),
-                    dtype=np.int32
-                )
-                full_labels = np.ndarray(
-                    shape=(batch_size, len(KLASS_LABEL_INFO)),
-                    dtype=np.int32
-                )
-            data_len += v.shape[0]
-
-            start = index * v.shape[0]
-            end = start + v.shape[0]
-            full_data[start:end, :] = v
-            if l is not None:
-                full_labels[start:end] = l
-
-            done = False
-            if v.shape[0] < load_size:
-                full_data = full_data[:data_len, :]
-                if full_labels is not None:
-                    full_labels = full_labels[:data_len]
-                done = True
-
-            if not done and data_len < batch_size:
-                continue
-
-            yield full_data, full_labels
-
-            full_data, full_labels = None, None
-            data_len, index = 0, 0
-
-    return vectorize
+        data_len, index = 0, 0
 
 
 def train(num_chunks):
@@ -123,8 +123,6 @@ def submission(num_chunks):
 
 def _save_vectors(name, num_chunks):
     batch_size = 1000
-    v = load.load_vectorizers(num_chunks)
-    gen = vectorizers(v)
 
     if name == 'train':
         loader = load.gen_train
@@ -137,9 +135,11 @@ def _save_vectors(name, num_chunks):
     else:
         raise Exception('unexpected name {}'.format(name))
 
-    fname = 'data/{}-vec-{}-{}.pkl.gz'.format(name, num_chunks, batch_size)
+    fname = 'data/{}-vec-{}-{}-{}.pkl.gz'.format(
+        name, batch_size, num_chunks, TRAIN_CHUNKS
+    )
     with gzip.open(fname, 'wb') as ifile:
-        for data, labels in gen(loader, num_chunks, batch_size):
+        for data, labels in vectorize(loader, num_chunks, batch_size):
             extra_bits = 8 - (data.shape[1] % 8)
             data = np.packbits(data, axis=1)
             pickle.dump((extra_bits, data, labels), ifile)
@@ -147,7 +147,9 @@ def _save_vectors(name, num_chunks):
 
 def _load_vectors(name, num_chunks):
     batch_size = 1000
-    fname = 'data/{}-vec-{}-{}.pkl.gz'.format(name, num_chunks, batch_size)
+    fname = 'data/{}-vec-{}-{}-{}.pkl.gz'.format(
+        name, batch_size, num_chunks, TRAIN_CHUNKS
+    )
     if not os.path.exists(fname):
         _save_vectors(name, num_chunks)
 
@@ -159,4 +161,4 @@ def _load_vectors(name, num_chunks):
                 data = data[:, :-extra_bits]
                 yield data, labels
             except EOFError:
-                return
+                break

@@ -32,7 +32,6 @@ if not os.path.exists(loc):
 filename = '{}-{}'.format(AMT, ITERATIONS)
 loc += '/' + filename
 
-
 NP_NDARRAY = None
 NP_ARRAY = None
 
@@ -60,7 +59,7 @@ def _get_np_array(shape, dtype):
 
 
 def vectorize(generator, X, Y, num_chunks, klass_num):
-    batch_size = 1000
+    batch_size = 5000
     data_len, index = 0, 0
     full_data, full_labels = None, None
     for data, labels in generator(num_chunks):
@@ -275,6 +274,7 @@ def test_DBN():
     #                 ))
 
 
+# @profile
 def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
                      training_epochs, batch_size, hidden_layer_sizes):
     """
@@ -316,7 +316,7 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
         (test_set_x, test_set_y)
     ]
 
-    train_chunks = 1
+    train_chunks = save.TRAIN_CHUNKS
     validate_chunks = 1
     test_chunks = 1
 
