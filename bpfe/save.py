@@ -14,7 +14,7 @@ except:
     import pickle
 
 
-TRAIN_CHUNKS = 4
+TRAIN_CHUNKS = 3
 
 
 def to_np_array(vectzers, data):

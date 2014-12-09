@@ -329,6 +329,19 @@ class DBN(object):
             }
         )
 
+        # submission_predict_proba_i = theano.function(
+        #     [index],
+        #     self.logLayer.predict_proba,
+        #     givens={
+        #         self.x: valid_set_x[
+        #             index * batch_size: (index + 1) * batch_size
+        #         ],
+        #         self.y: T.cast(valid_set_y[
+        #             index * batch_size: (index + 1) * batch_size
+        #         ], 'int32')
+        #     }
+        # )
+
         # Create a function that scans the entire validation set
         def valid_score(gen):
             scores = []
@@ -346,6 +359,18 @@ class DBN(object):
                 n_test_batches /= batch_size
                 scores += [test_score_i(i) for i in xrange(n_test_batches)]
             return scores
+
+        # # Create a function that gets prediction probas
+        # def submission_preds(gen):
+        #     predict_probas = []
+        #     for _ in gen:
+        #         n_submission_batches = submission_set_x.get_value(
+        #             borrow=True).shape[0]
+        #         n_submission_batches /= batch_size
+        #         predict_probas += [
+        #             submission_predict_proba_i(i) for i in xrange(
+        #                 n_submission_batches)]
+        #     return predict_probas
 
         return train_fn, valid_score, test_score
 

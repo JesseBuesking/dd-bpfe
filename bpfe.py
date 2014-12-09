@@ -229,8 +229,8 @@ def stats():
 
 def test_DBN():
     """ """
-    # k_opts = [1, 5, 10]
-    # batch_size_opts = [10, 5, 1]
+    # k_opts = [5]
+    # batch_size_opts = [10]
     # hidden_layer_size_opts = [500]
     # pretrain_lr_opts = [0.01, 0.001]
     # finetune_lr_opts = [0.1, 0.01]
@@ -239,9 +239,9 @@ def test_DBN():
     k_opts = [1]
     hidden_layer_depth_opts = [3]
     batch_size_opts = [5]
-    hidden_layer_size_opts = [50]
-    pretrain_lr_opts = [0.1]
-    finetune_lr_opts = [0.01]
+    hidden_layer_size_opts = [500]
+    pretrain_lr_opts = [0.01]
+    finetune_lr_opts = [0.1]
     combos = []
     for ko in k_opts:
         for bso in batch_size_opts:
@@ -255,10 +255,10 @@ def test_DBN():
         start = time.clock()
         _run_with_params(
             finetune_lr=flo,
-            pretraining_epochs=1,
+            pretraining_epochs=100,
             pretrain_lr=plo,
             k=ko,
-            training_epochs=1,
+            training_epochs=100,
             batch_size=bso,
             hidden_layer_sizes=hls
         )
@@ -456,7 +456,10 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
         )
 
         # go through pretraining epochs
-        for epoch in xrange(settings['pretraining_epochs']):
+        pepochs = settings['pretraining_epochs']
+        if i > 0:
+            pepochs /= 2
+        for epoch in xrange(pepochs):
             start = time.clock()
             # go through the training set
             c = []
@@ -619,25 +622,28 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
             ' ran for %.2fm' % ((end_time - start_time) / 60.)
         )
 
-        stats = [
-            settings,
-            best_validation_loss,
-            best_iter,
-            test_score
-        ]
+    # with open('data/final-model.pkl', 'wb') as ifile:
+    #     pickle.dump(dbn, ifile)
 
-        if klass not in settings_stats:
-            settings_stats[klass] = []
-
-        for data in settings_stats[klass]:
-            data_settings_key = settings_name(data[0])
-            if data_settings_key == current_settings_key:
-                break
-
-        settings_stats[klass].append(stats)
-
-        with open(settings_stats_fname, 'wb') as ifile:
-            pickle.dump(settings_stats, ifile)
+        # stats = [
+        #     settings,
+        #     best_validation_loss,
+        #     best_iter,
+        #     test_score
+        # ]
+        #
+        # if klass not in settings_stats:
+        #     settings_stats[klass] = []
+        #
+        # for data in settings_stats[klass]:
+        #     data_settings_key = settings_name(data[0])
+        #     if data_settings_key == current_settings_key:
+        #         break
+        #
+        # settings_stats[klass].append(stats)
+        #
+        # with open(settings_stats_fname, 'wb') as ifile:
+        #     pickle.dump(settings_stats, ifile)
 
 
 if __name__ == '__main__':

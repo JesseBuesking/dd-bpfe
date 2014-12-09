@@ -168,6 +168,9 @@ class LogisticRegression(object):
         else:
             raise NotImplementedError()
 
+    def predict_proba(self):
+        return self.p_y_given_x
+
 
 def load_data(dataset):
     ''' Loads the dataset
