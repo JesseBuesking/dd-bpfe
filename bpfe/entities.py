@@ -46,11 +46,13 @@ class Label(object):
         return val
 
     def to_vec(self, klass_num=None):
-        ret = [0] * len(FLAT_LABELS)
+        ret = None
 
         for idx, (key, val) in enumerate(FLAT_LABELS):
             if klass_num is not None and KLASS_LABEL_INFO[key][0] != klass_num:
                 continue
+            if ret is None:
+                ret = [0] * KLASS_LABEL_INFO[key][1]
             # noinspection PyTypeChecker
             attr = LABEL_MAPPING[key]
             value = getattr(self, attr)

@@ -14,7 +14,7 @@ except:
     import pickle
 
 
-TRAIN_CHUNKS = 3
+TRAIN_CHUNKS = 1
 
 
 def to_np_array(vectzers, data):
@@ -59,6 +59,8 @@ def to_np_array(vectzers, data):
     if len(labels) > 0:
         # noinspection PyUnresolvedReferences
         labels = np.array(labels)
+    else:
+        labels = None
 
     return vecs, labels
 
@@ -77,16 +79,17 @@ def vectorize(generator, num_chunks, batch_size):
                 shape=(batch_size, v.shape[1]),
                 dtype=np.int32
             )
-            full_labels = np.ndarray(
-                shape=(batch_size, len(KLASS_LABEL_INFO)),
-                dtype=np.int32
-            )
         data_len += v.shape[0]
 
         start = index * v.shape[0]
         end = start + v.shape[0]
         full_data[start:end, :] = v
         if l is not None:
+            if full_labels is None:
+                full_labels = np.ndarray(
+                    shape=(batch_size, len(KLASS_LABEL_INFO)),
+                    dtype=np.int32
+                )
             full_labels[start:end] = l
 
         done = False

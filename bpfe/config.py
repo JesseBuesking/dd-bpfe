@@ -1,3 +1,7 @@
+import os
+import numpy
+
+
 INPUT_MAPPING = {
     'Object_Description': 'object_description',
     'Program_Description': 'program_description',
@@ -179,3 +183,280 @@ for tup in FLAT_LABELS:
         _klass_idx += 1
     info = KLASS_LABEL_INFO[tup[0]]
     KLASS_LABEL_INFO[tup[0]] = (info[0], info[1] + 1)
+
+
+class HiddenLayerSettings(object):
+
+    def __init__(self, num_nodes, epochs, learning_rate):
+        self.num_nodes = num_nodes
+        self.epochs = epochs
+        self.learning_rate = learning_rate
+
+    @property
+    def num_nodes(self):
+        return self._num_nodes
+
+    @num_nodes.setter
+    def num_nodes(self, value):
+        assert isinstance(value, int)
+        self._num_nodes = value
+
+    @property
+    def epochs(self):
+        return self._epochs
+
+    @epochs.setter
+    def epochs(self, value):
+        assert isinstance(value, int)
+        self._epochs = value
+
+    @property
+    def learning_rate(self):
+        return self._learning_rate
+
+    @learning_rate.setter
+    def learning_rate(self, value):
+        assert isinstance(value, float)
+        self._learning_rate = value
+
+    def __str__(self):
+        return '{}-{}-{}'.format(
+            self.num_nodes,
+            self.epochs,
+            self.learning_rate
+        )
+
+
+class FinetuningSettings(object):
+
+    def __init__(self, epochs, learning_rate):
+        self.epochs = epochs
+        self.learning_rate = learning_rate
+
+    @property
+    def epochs(self):
+        return self._epochs
+
+    @epochs.setter
+    def epochs(self, value):
+        assert isinstance(value, int)
+        self._epochs = value
+
+    @property
+    def learning_rate(self):
+        return self._learning_rate
+
+    @learning_rate.setter
+    def learning_rate(self, value):
+        assert isinstance(value, float)
+        self._learning_rate = value
+
+    def __str__(self):
+        return '{}-{}'.format(
+            self.epochs,
+            self.learning_rate
+        )
+
+    def __eq__(self, other):
+        return \
+            self.epochs == other.epochs and \
+            self.learning_rate == other.learning_rate
+
+
+class ChunkSettings(object):
+
+    def __init__(self, train, validate, test):
+        self.train = train
+        self.validate = validate
+        self.test = test
+        self.submission = train
+
+    @property
+    def train(self):
+        return self._train
+
+    @train.setter
+    def train(self, value):
+        assert isinstance(value, int)
+        self._train = value
+
+    @property
+    def validate(self):
+        return self._validate
+
+    @validate.setter
+    def validate(self, value):
+        assert isinstance(value, int)
+        self._validate = value
+
+    @property
+    def test(self):
+        return self._test
+
+    @test.setter
+    def test(self, value):
+        assert isinstance(value, int)
+        self._test = value
+
+    @property
+    def submission(self):
+        return self._submission
+
+    @submission.setter
+    def submission(self, value):
+        assert isinstance(value, int)
+        self._submission = value
+
+    def __eq__(self, other):
+        return \
+            self.train == other.train and \
+            self.validate == other.validate and \
+            self.test == other.test and \
+            self.submission == other.submission
+
+    def __str__(self):
+        return '{}-{}-{}-{}'.format(
+            self.train,
+            self.validate,
+            self.test,
+            self.submission
+        )
+
+
+class Settings(object):
+
+    @property
+    def version(self):
+        return self._version
+
+    @version.setter
+    def version(self, value):
+        assert isinstance(value, float)
+        self._version = value
+
+    @property
+    def theano_rng(self):
+        return self._theano_rng
+
+    @theano_rng.setter
+    def theano_rng(self, value):
+        from theano.tensor.shared_randomstreams import RandomStreams
+        assert isinstance(value, RandomStreams)
+        self._theano_rng = value
+
+    @property
+    def numpy_rng(self):
+        return self._numpy_rng
+
+    @numpy_rng.setter
+    def numpy_rng(self, value):
+        # noinspection PyUnresolvedReferences
+        assert isinstance(value, numpy.random.RandomState)
+        self._numpy_rng = value
+
+    @property
+    def train_size(self):
+        return self._train_size
+
+    @train_size.setter
+    def train_size(self, value):
+        assert isinstance(value, int)
+        self._train_size = value
+
+    @property
+    def num_cols(self):
+        return self._num_cols
+
+    @num_cols.setter
+    def num_cols(self, value):
+        assert isinstance(value, int)
+        self._num_cols = value
+
+    @property
+    def batch_size(self):
+        return self._batch_size
+
+    @batch_size.setter
+    def batch_size(self, value):
+        assert isinstance(value, int)
+        self._batch_size = value
+
+    @property
+    def hidden_layers(self):
+        return self._hidden_layers
+
+    @hidden_layers.setter
+    def hidden_layers(self, value):
+        assert isinstance(value, list)
+        assert isinstance(value[0], HiddenLayerSettings)
+        self._hidden_layers = value
+
+    @property
+    def k(self):
+        return self._k
+
+    @k.setter
+    def k(self, value):
+        assert isinstance(value, int)
+        self._k = value
+
+    @property
+    def finetuning(self):
+        return self._finetuning
+
+    @finetuning.setter
+    def finetuning(self, value):
+        assert isinstance(value, FinetuningSettings)
+        self._finetuning = value
+
+    @property
+    def chunks(self):
+        return self._chunks
+
+    @chunks.setter
+    def chunks(self, value):
+        assert isinstance(value, ChunkSettings)
+        self._chunks = value
+
+    def pretrain_string(self, layer_num):
+        return '{}-{}-{}-{}'.format(
+            self.batch_size,
+            self.k,
+            self.chunks,
+            self.hidden_layers[layer_num]
+        )
+
+    def finetune_string(self):
+        return '{}-{}-{}-{}'.format(
+            self.batch_size,
+            self.k,
+            self.chunks,
+            self.finetuning
+        )
+
+    def pretrain_fname(self, layer_num):
+        return '{}-{}-{}'.format(
+            self.version,
+            self.pretrain_string(layer_num),
+            layer_num
+        )
+
+    def finetuning_fname(self):
+        return '{}-{}'.format(
+            self.version,
+            self.finetune_string()
+        )
+
+    def __eq__(self, other):
+        return \
+            self.version == other.version and \
+            self.batch_size == other.batch_size and \
+            self.hidden_layers == other.hidden_layers and \
+            self.k == other.k and \
+            self.finetuning == other.finetuning and \
+            self.chunks == other.chunks
+
+
+class StatsSettings(object):
+
+    fname = 'data/settings_stats.pkl'

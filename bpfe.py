@@ -6,8 +6,10 @@ import sys
 import time
 import theano
 from theano.tensor.shared_randomstreams import RandomStreams
-from bpfe import scoring, save
-from bpfe.config import FLAT_LABELS, KLASS_LABEL_INFO
+from bpfe import scoring, save, cache
+from bpfe.cache import load_stats
+from bpfe.config import FLAT_LABELS, KLASS_LABEL_INFO, Settings, \
+    HiddenLayerSettings, FinetuningSettings, ChunkSettings
 from bpfe.dl_dbn.DBN import DBN
 import numpy
 import bpfe.load as load
@@ -236,69 +238,69 @@ def test_DBN():
     # finetune_lr_opts = [0.1, 0.01]
     # hidden_layer_depth_opts = [3, 4]
 
-    k_opts = [1]
-    hidden_layer_depth_opts = [3]
-    batch_size_opts = [5]
-    hidden_layer_size_opts = [500]
-    pretrain_lr_opts = [0.01]
-    finetune_lr_opts = [0.1]
-    combos = []
-    for ko in k_opts:
-        for bso in batch_size_opts:
-            for hlso in hidden_layer_size_opts:
-                for plo in pretrain_lr_opts:
-                    for flo in finetune_lr_opts:
-                        for hldo in hidden_layer_depth_opts:
-                            combos.append((ko, bso, hlso, hldo, flo, plo))
-    for ko, bso, hlso, hldo, flo, plo in combos:
-        hls = [hlso for _ in range(hldo)]
-        start = time.clock()
-        _run_with_params(
-            finetune_lr=flo,
-            pretraining_epochs=100,
-            pretrain_lr=plo,
-            k=ko,
-            training_epochs=100,
-            batch_size=bso,
-            hidden_layer_sizes=hls
-        )
-        print('DURATION: {}'.format(time.clock() - start))
+    settings = Settings()
+    settings.version = 1.0
+    settings.k = 1
+    settings.hidden_layers = [
+        HiddenLayerSettings(50, 1, 0.01),
+        HiddenLayerSettings(50, 1, 0.01),
+        HiddenLayerSettings(50, 1, 0.01)
+    ]
+    settings.batch_size = 5
+    settings.finetuning = FinetuningSettings(1, 0.1)
+    settings.chunks = ChunkSettings(save.TRAIN_CHUNKS, 1, 1)
 
-    settings_stats_fname = 'data/settings_stats.pkl'
-    if os.path.exists(settings_stats_fname):
-        with open(settings_stats_fname, 'rb') as ifile:
-            settings_stats = pickle.load(ifile)
-            for klass, all_stats in settings_stats.items():
-                all_stats.sort(key=lambda x: x[3], reverse=True)
+    # combos = []
+    # for ko in k_opts:
+    #     for bso in batch_size_opts:
+    #         for hlso in hidden_layer_size_opts:
+    #             for plo in pretrain_lr_opts:
+    #                 for flo in finetune_lr_opts:
+    #                     for hldo in hidden_layer_depth_opts:
+    #                         combos.append((ko, bso, hlso, hldo, flo, plo))
+    # for ko, bso, hlso, hldo, flo, plo in combos:
+    # hls = [hlso for _ in range(hldo)]
+    start = time.clock()
+    _run_with_params(settings)
+    print('DURATION: {}'.format(time.clock() - start))
 
-                print('for {}:'.format(klass))
-                for ind, stats in enumerate(all_stats):
-                    settings_key = ', '.join([
-                        str(k) + ': ' + str(v) for k, v in stats[0].items()
-                    ])
-                    print('\t{}: {}, {} for [{}]'.format(
-                        ind, stats[3], stats[1], settings_key
-                    ))
+    # settings_stats_fname = 'data/settings_stats.pkl'
+    # if os.path.exists(settings_stats_fname):
+    #     with open(settings_stats_fname, 'rb') as ifile:
+    #         settings_stats = pickle.load(ifile)
+    #         for klass, all_stats in settings_stats.items():
+    #             all_stats.sort(key=lambda x: x[3], reverse=True)
+    #
+    #             print('for {}:'.format(klass))
+    #             for ind, stats in enumerate(all_stats):
+    #                 settings_key = ', '.join([
+    #                     str(k) + ': ' + str(v) for k, v in stats[0].items()
+    #                 ])
+    #                 print('\t{}: {}, {} for [{}]'.format(
+    #                     ind, stats[3], stats[1], settings_key
+    #                 ))
 
 
-def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
-                     training_epochs, batch_size, hidden_layer_sizes):
+def _run_with_params(settings):
     """
-    :type finetune_lr: float
-    :param finetune_lr: learning rate used in the finetune stage
-    :type pretraining_epochs: int
-    :param pretraining_epochs: number of epoch to do pretraining
-    :type pretrain_lr: float
-    :param pretrain_lr: learning rate to be used during pre-training
-    :type k: int
-    :param k: number of Gibbs steps in CD/PCD
-    :type training_epochs: int
-    :param training_epochs: maximal number of iterations ot run the optimizer
-    :type batch_size: int
-    :param batch_size: the size of a minibatch
+    :param Settings settings:
     """
 
-    total_size = 0
+    # deal_gen = load.gen_train(
+    #     num_chunks=None, batch_size=15000
+    # )
+    #
+    # d = dict()
+    # for idx, data in enumerate([dg for dg in deal_gen][0]):
+    #     if data[1].function not in d:
+    #         d[data[1].function] = 0
+    #     d[data[1].function] += 1
+    # tups = [(a, b) for (a, b) in d.items()]
+    # tups.sort(key=lambda x: x[0])
+    # print(tups)
+    # raise
+
+    settings.train_size = 0
 
     def shared_dataset():
         # noinspection PyUnresolvedReferences
@@ -316,15 +318,13 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
     test_set_x, test_set_y = shared_dataset()
     valid_set_x, valid_set_y = shared_dataset()
     train_set_x, train_set_y = shared_dataset()
+    submission_set_x, submission_set_y = shared_dataset()
     datasets = [
         (train_set_x, train_set_y),
         (valid_set_x, valid_set_y),
-        (test_set_x, test_set_y)
+        (test_set_x, test_set_y),
+        (submission_set_x, submission_set_y)
     ]
-
-    train_chunks = save.TRAIN_CHUNKS
-    validate_chunks = 1
-    test_chunks = 1
 
     # train_len = 0
     # for data, _ in save.train(train_chunks):
@@ -353,68 +353,46 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
     # print_sizes(load.gen_test, 'test')
     # print_sizes(load.gen_submission, 'submission')
 
-    for _ in vectorize(save.train, train_set_x, train_set_y, train_chunks, 0):
-        break
-    input_size = train_set_x.get_value(borrow=True).shape[1]
+    settings.train_size = 0
+    settings.num_cols = 0
+    for _ in vectorize(
+            save.train,
+            train_set_x,
+            train_set_y,
+            settings.chunks.train,
+            0
+    ):
+        settings.train_size += train_set_x.get_value(borrow=True).shape[0]
+    settings.num_cols = train_set_x.get_value(borrow=True).shape[1]
 
-    settings_stats_fname = 'data/settings_stats.pkl'
-    if os.path.exists(settings_stats_fname):
-        with open(settings_stats_fname, 'rb') as ifile:
-            settings_stats = pickle.load(ifile)
-    else:
-        settings_stats = dict()
-
-    settings = {
-        'k': k,
-        'pretraining_epochs': pretraining_epochs,
-        'batch_size': batch_size,
-        'pretrain_lr': pretrain_lr,
-        'finetune_lr': finetune_lr,
-        'train_chunks': train_chunks,
-        'validate_chunks': validate_chunks,
-        'test_chunks': test_chunks,
-        'hidden_layer_sizes': '_'.join([str(z) for z in hidden_layer_sizes]),
-        'training_epochs': training_epochs
-    }
-
-    def settings_name(s):
-        tups = [(k, v) for k, v in s.items()]
-        tups.sort(key=lambda x: x[0])
-        return ', '.join([str(k) + ': ' + str(v) for k, v in tups])
-
-    current_settings_key = settings_name(settings)
+    settings_stats = load_stats()
 
     already_ran = False
     a_class = KLASS_LABEL_INFO.keys()[0]
     if a_class in settings_stats:
         for data in settings_stats[a_class]:
-            data_settings_key = settings_name(data[0])
-            if data_settings_key == current_settings_key:
+            if data[0] == settings:
                 already_ran = True
 
     if already_ran:
         return
 
-    file_key = {
-        'k': k,
-        'batch_size': batch_size,
-        'pretrain_lr': pretrain_lr,
-        'hidden_layer_sizes': str(hidden_layer_sizes[0])
-    }
-    settings_values = sorted(file_key.values(), key=lambda x: x)
-
-    print('input size: {}'.format(input_size))
+    print('input size: {}'.format(settings.num_cols))
 
     # numpy random generator
     # noinspection PyUnresolvedReferences
-    numpy_rng = numpy.random.RandomState(123)
+    settings.numpy_rng = numpy.random.RandomState(123)
     # theano random generator
-    theano_rng = RandomStreams(numpy_rng.randint(2 ** 30))
-    print '... building the model'
+    settings.theano_rng = RandomStreams(
+        settings.numpy_rng.randint(2 ** 30)
+    )
+
+    print('... building the model')
+
     # construct the Deep Belief Network
     dbn = DBN(
-        n_ins=input_size,
-        hidden_layers_sizes=hidden_layer_sizes,
+        n_ins=settings.num_cols,
+        hidden_layers_sizes=[hl.num_nodes for hl in settings.hidden_layers],
         n_outs=104
     )
 
@@ -423,72 +401,63 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
     # PRETRAINING THE MODEL #
     #########################
 
-    print '... pre-training the model'
+    print('... pre-training the model')
+
     start_time = time.clock()
     ## Pre-train layer-wise
-    for i in xrange(dbn.n_layers):
-        rbm_info = [
-            i,
-            dbn.hidden_layer_sizes[i]
-        ] + settings_values
-        filename = 'data/hidden_layers/{}.pkl'.format(
-            '-'.join([str(s) for s in rbm_info])
-        )
-        if os.path.exists(filename):
-            print('layer {} already exists on disk, loading ...'.format(i))
-            with open(filename, 'rb') as ifile:
-                data = pickle.load(ifile)
-                dbn = data[0]
-                dbn.hidden_layer_sizes = hidden_layer_sizes
-                total_size = data[1]
-                numpy_rng = data[2]
-                theano_rng = data[3]
-                continue
+    for layer_idx in xrange(dbn.n_layers):
+        cache_pretrain = cache.load_pretrain_layer(layer_idx, settings)
+        if cache_pretrain is not None:
+            print('layer {} already exists on disk, loading ...'.format(
+                layer_idx
+            ))
+            dbn, settings = cache_pretrain
+            continue
 
-        print('getting the pre-training function for layer {} ...'.format(i))
+        print('getting the pre-training function for layer {} ...'.format(
+            layer_idx
+        ))
         pretraining_fn = dbn.pretraining_function(
             train_set_x,
-            settings['batch_size'],
-            settings['k'],
-            i,
-            numpy_rng,
-            theano_rng
+            settings.batch_size,
+            settings.k,
+            layer_idx,
+            settings.numpy_rng,
+            settings.theano_rng
         )
 
         # go through pretraining epochs
-        pepochs = settings['pretraining_epochs']
-        if i > 0:
-            pepochs /= 2
-        for epoch in xrange(pepochs):
+        for epoch in xrange(settings.hidden_layers[layer_idx].epochs):
             start = time.clock()
             # go through the training set
             c = []
 
             for row_len in vectorize(
-                    save.train, train_set_x, train_set_y, train_chunks, 0):
-                if epoch == 0:
-                    total_size += row_len
+                    save.train,
+                    train_set_x,
+                    train_set_y,
+                    settings.chunks.train,
+                    0
+            ):
 
-                # compute number of minibatches for training, validation and testing
-                n_train_batches = row_len / settings['batch_size']
+                # compute number of mini-batches for training, validation and
+                # testing
+                n_train_batches = row_len / settings.batch_size
                 for batch_index in xrange(n_train_batches):
-                    c.append(
-                        pretraining_fn(index=batch_index,
-                                       lr=settings['pretrain_lr'])
-                    )
+                    c.append(pretraining_fn(
+                        index=batch_index,
+                        lr=settings.hidden_layers[layer_idx].learning_rate
+                    ))
 
             print(
                 'Pre-training layer {}, epoch {}, cost {}, elapsed {}'.format(
-                    i, epoch, numpy.mean(c), time.clock() - start
+                    layer_idx, epoch, numpy.mean(c), time.clock() - start
                 )
             )
 
-        with open(filename, 'wb') as ifile:
-            data = (dbn, total_size, numpy_rng, theano_rng)
-            pickle.dump(data, ifile)
+        cache.save_pretrain_layer(dbn, layer_idx, settings)
 
-    total_size /= dbn.n_layers
-    # print('ts', total_size)
+    # print('ts', settings.train_size)
 
     end_time = time.clock()
     # end-snippet-2
@@ -498,6 +467,16 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
     ########################
     # FINETUNING THE MODEL #
     ########################
+
+    finetune(dbn, datasets, settings)
+
+
+def finetune(dbn, datasets, settings):
+
+    (train_set_x, train_set_y) = datasets[0]
+    (valid_set_x, valid_set_y) = datasets[1]
+    (test_set_x, test_set_y) = datasets[2]
+    (submission_set_x, submission_set_y) = datasets[3]
 
     # TODO since we're running a single class....
     # with open('data/current-dbn.pkl', 'wb') as ifile:
@@ -511,119 +490,194 @@ def _run_with_params(finetune_lr, pretraining_epochs, pretrain_lr, k,
         #     dbn = pickle.load(ifile)
 
         dbn.number_of_outputs = count
-        dbn.create_output_layer()
 
-        # get the training, validation and testing function for the model
-        print '... getting the finetuning functions'
-        train_fn, validate_model, test_model = dbn.build_finetune_functions(
-            datasets=datasets,
-            batch_size=settings['batch_size'],
-            learning_rate=settings['finetune_lr']
-        )
+        val = cache.load_finetuning(settings, klass_num)
+        if val is not None:
+            dbn, settings = val
+            train_fn, train_model, validate_model, test_model, \
+                train_pred, submission_pred = \
+                    dbn.build_finetune_functions(
+                        datasets=datasets,
+                        batch_size=settings.batch_size,
+                        learning_rate=settings.finetuning.learning_rate
+                    )
+        else:
+            print('... finetuning the model')
+            dbn.create_output_layer()
 
-        print '... finetuning the model'
-        # early-stopping parameters
-        n_train_batches = total_size / settings['batch_size']
-        # print('tb', n_train_batches)
-        patience = 4 * n_train_batches  # look as this many examples regardless
-        # go through this many
-        # minibatches before checking the network
-        # on the validation set; in this case we
-        # check every epoch
-        validation_frequency = min(n_train_batches, patience / 2)
-        patience_increase = 2.    # wait this much longer when a new best is
-        # found
-        improvement_threshold = 0.995  # a relative improvement of this much is
+            # get the training, validation and testing function for the model
+            print('... getting the finetuning functions')
+            train_fn, train_model, validate_model, test_model, \
+                train_pred, submission_pred = \
+                dbn.build_finetune_functions(
+                    datasets=datasets,
+                    batch_size=settings.batch_size,
+                    learning_rate=settings.finetuning.learning_rate
+                )
 
-        best_validation_loss = numpy.inf
-        test_score = 0.
-        start_time = time.clock()
+            n_train_batches = settings.train_size / settings.batch_size
+            patience = 4 * n_train_batches
+            validation_frequency = min(n_train_batches, patience / 2)
+            patience_increase = 2.
+            improvement_threshold = 0.995
 
-        done_looping = False
-        epoch = 0
+            best_validation_loss = numpy.inf
+            test_score = 0.
+            start_time = time.clock()
 
-        itr = 0
-        while (epoch < training_epochs) and (not done_looping):
-            epoch = epoch + 1
-            idx = 0
-            while idx < n_train_batches:
-                for row_len in vectorize(
-                        save.train, train_set_x, train_set_y, train_chunks,
-                        klass_num):
-                    sub_train_batches = row_len / settings['batch_size']
+            done_looping = False
+            epoch = 0
 
-                    for minibatch_index in xrange(sub_train_batches):
-                        train_fn(minibatch_index)
-                        itr = (epoch - 1) * n_train_batches + idx
-                        idx += 1
+            itr = 0
+            while (epoch < settings.finetuning.epochs) and (not done_looping):
+                epoch += 1
+                idx = 0
+                while idx < n_train_batches:
+                    for row_len in vectorize(
+                            save.train,
+                            train_set_x,
+                            train_set_y,
+                            settings.chunks.train,
+                            klass_num
+                    ):
+                        sub_train_batches = row_len / settings.batch_size
 
-                    if (itr + 1) % validation_frequency == 0:
+                        for minibatch_index in xrange(sub_train_batches):
+                            train_fn(minibatch_index)
+                            itr = (epoch - 1) * n_train_batches + idx
+                            idx += 1
 
-                        validation_losses = validate_model(
-                            vectorize(save.validate, valid_set_x, valid_set_y,
-                                      validate_chunks, klass_num)
-                        )
-                        this_validation_loss = numpy.mean(validation_losses)
-                        print(
-                            'epoch %i, minibatch %i/%i, validation error %f %%'
-                            % (
-                                epoch,
-                                idx,
-                                n_train_batches,
-                                this_validation_loss * 100.
+                        if (itr + 1) % validation_frequency == 0:
+
+                            validation_losses = validate_model(vectorize(
+                                save.validate,
+                                valid_set_x,
+                                valid_set_y,
+                                settings.chunks.validate,
+                                klass_num
+                            ))
+                            this_validation_loss = numpy.mean(validation_losses)
+
+                            train_losses = train_model(vectorize(
+                                save.train,
+                                train_set_x,
+                                train_set_y,
+                                settings.chunks.train,
+                                klass_num
+                            ))
+                            this_train_loss = numpy.mean(train_losses)
+                            print(
+                                'epoch {}, validation error {:.3f}% {:.3f}%'.format(
+                                    epoch,
+                                    this_validation_loss * 100.,
+                                    this_train_loss * 100.
+                                )
                             )
-                        )
 
-                        # if we got the best validation score until now
-                        if this_validation_loss < best_validation_loss:
+                            # if we got the best validation score until now
+                            if this_validation_loss < best_validation_loss:
 
-                            #improve patience if loss improvement is good enough
-                            if (
-                                    this_validation_loss < best_validation_loss *
-                                    improvement_threshold
-                            ):
-                                patience = max(patience, itr * patience_increase)
+                                #improve patience if loss improvement is good enough
+                                if (
+                                        this_validation_loss < best_validation_loss *
+                                        improvement_threshold
+                                ):
+                                    patience = max(patience, itr * patience_increase)
 
-                            # save best validation score and iteration number
-                            best_validation_loss = this_validation_loss
-                            best_iter = itr
+                                # save best validation score and iteration number
+                                best_validation_loss = this_validation_loss
+                                best_iter = itr
 
-                            # test it on the test set
-                            test_losses = test_model(
-                                vectorize(save.test, test_set_x, test_set_y,
-                                          test_chunks, klass_num)
-                            )
-                            test_score = numpy.mean(test_losses)
-                            print(('     epoch %i, minibatch %i/%i, test error of '
-                                   'best model %f %%') %
-                                  (epoch, idx, n_train_batches, test_score * 100.))
+                                cache.save_finetuning(dbn, settings, klass_num)
 
-                    if patience <= itr:
-                        done_looping = True
-                        break
+                                # test it on the test set
+                                test_losses = test_model(vectorize(
+                                    save.test,
+                                    test_set_x,
+                                    test_set_y,
+                                    settings.chunks.test,
+                                    klass_num
+                                ))
+                                test_score = numpy.mean(test_losses)
+                                print('  epoch {}, test error {}%'.format(
+                                    epoch, test_score * 100.
+                                ))
 
-        end_time = time.clock()
-        print(
-            (
-                'Optimization complete with best validation score of {}%, '
-                'obtained at iteration {}, '
-                'with test performance {}% '
-                'for class {}'
-            ).format(
+                        if patience <= itr:
+                            done_looping = True
+                            break
+
+            end_time = time.clock()
+            print(
+                'optimization complete. validation {}% @ iter {}, '
+                'with test performance {}% for class {}'.format(
                 best_validation_loss * 100.,
                 best_iter + 1,
                 test_score * 100.,
                 klass
-            )
-        )
-        print >> sys.stderr, (
-            'The fine tuning code for file ' +
-            os.path.split(__file__)[1] +
-            ' ran for %.2fm' % ((end_time - start_time) / 60.)
+            ))
+
+            sys.stderr.write('fine tuning for {} ran for {:.2f}\n'.format(
+                os.path.split(__file__)[1], ((end_time - start_time) / 60.)
+            ))
+
+        test_losses = train_pred(vectorize(
+            save.train,
+            train_set_x,
+            train_set_y,
+            settings.chunks.test,
+            klass_num
+        ))
+
+        num_predictions = len(test_losses)
+        print(num_predictions)
+        prec = np.get_printoptions()['precision']
+        np.set_printoptions(suppress=True, precision=4)
+        for vec in test_losses[:3]:
+            print(vec)
+
+        deal_gen = load.gen_train(
+            num_chunks=None, batch_size=num_predictions
         )
 
-    # with open('data/final-model.pkl', 'wb') as ifile:
+        matches = 0
+        score = 0
+        d = dict()
+        for idx, data in enumerate([dg for dg in deal_gen][0]):
+            am = numpy.argmax(test_losses[idx])
+            if am not in d:
+                d[am] = 0
+            d[am] += 1
+            matches += data[1].to_klass_num(klass_num) == am
+            # noinspection PyUnresolvedReferences
+            score += ((
+                numpy.array(data[1].to_vec(klass_num)) - test_losses[idx]
+            ) ** 2).sum()
+        print('score: {:.4f}/{} = {:.4f}'.format(
+            score, num_predictions, score/num_predictions
+        ))
+
+        deal_gen = load.gen_train(
+            num_chunks=None, batch_size=num_predictions
+        )
+
+        for idx, data in enumerate([dg for dg in deal_gen][0]):
+            preds = ['%.10f' % i for i in numpy.nditer(test_losses[idx])]
+            print(
+                data[0].id,
+                data[1].function,
+                data[1].to_klass_num(klass_num),
+                ' '.join(preds)
+            )
+            if idx > 10:
+                break
+        np.set_printoptions(suppress=False, precision=prec)
+        print(d)
+        print(matches, num_predictions)
+
+    # with open(final_fname, 'wb') as ifile:
     #     pickle.dump(dbn, ifile)
+    # return final_fname
 
         # stats = [
         #     settings,

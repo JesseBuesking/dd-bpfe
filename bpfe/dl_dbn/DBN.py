@@ -1,17 +1,12 @@
 """
 """
-import os
-import sys
-import time
-import math
 
 import numpy
 
 import theano
 import theano.tensor as T
-from theano.tensor.shared_randomstreams import RandomStreams
 
-from logistic_sgd import LogisticRegression, load_data
+from logistic_sgd import LogisticRegression
 from rbm import RBM
 
 
@@ -59,6 +54,7 @@ class HiddenLayer(object):
         #        We have no info for other function, so we use the same as
         #        tanh.
         if W is None:
+            # noinspection PyUnresolvedReferences
             W_values = numpy.asarray(
                 rng.uniform(
                     low=-numpy.sqrt(6. / (n_in + n_out)),
@@ -73,6 +69,7 @@ class HiddenLayer(object):
             W = theano.shared(value=W_values, name='W', borrow=True)
 
         if b is None:
+            # noinspection PyUnresolvedReferences
             b_values = numpy.zeros((n_out,), dtype=theano.config.floatX)
             b = theano.shared(value=b_values, name='b', borrow=True)
 
@@ -196,7 +193,7 @@ class DBN(object):
     def create_output_layer(self):
         # We now need to add a logistic layer on top of the MLP
         self.logLayer = LogisticRegression(
-            input=self.sigmoid_layers[-1].output,
+            input_vector=self.sigmoid_layers[-1].output,
             n_in=self.hidden_layer_sizes[-1],
             n_out=self.number_of_outputs
         )
@@ -278,6 +275,7 @@ class DBN(object):
         (train_set_x, train_set_y) = datasets[0]
         (valid_set_x, valid_set_y) = datasets[1]
         (test_set_x, test_set_y) = datasets[2]
+        (submission_set_x, submission_set_y) = datasets[2]
 
         index = T.lscalar('index')  # index to a [mini]batch
 
@@ -293,6 +291,19 @@ class DBN(object):
             inputs=[index],
             outputs=self.finetune_cost,
             updates=updates,
+            givens={
+                self.x: train_set_x[
+                    index * batch_size: (index + 1) * batch_size
+                ],
+                self.y: T.cast(train_set_y[
+                    index * batch_size: (index + 1) * batch_size
+                ], 'int32')
+            }
+        )
+
+        train_score_i = theano.function(
+            [index],
+            self.errors,
             givens={
                 self.x: train_set_x[
                     index * batch_size: (index + 1) * batch_size
@@ -329,18 +340,34 @@ class DBN(object):
             }
         )
 
-        # submission_predict_proba_i = theano.function(
-        #     [index],
-        #     self.logLayer.predict_proba,
-        #     givens={
-        #         self.x: valid_set_x[
-        #             index * batch_size: (index + 1) * batch_size
-        #         ],
-        #         self.y: T.cast(valid_set_y[
-        #             index * batch_size: (index + 1) * batch_size
-        #         ], 'int32')
-        #     }
-        # )
+        train_predict_proba_i = theano.function(
+            [index],
+            self.logLayer.predict_proba(),
+            givens={
+                self.x: train_set_x[
+                    index * batch_size: (index + 1) * batch_size
+                ]
+            }
+        )
+
+        submission_predict_proba_i = theano.function(
+            [index],
+            self.logLayer.predict_proba(),
+            givens={
+                self.x: submission_set_x[
+                    index * batch_size: (index + 1) * batch_size
+                ]
+            }
+        )
+
+        # Create a function that scans the entire train set
+        def train_score(gen):
+            scores = []
+            for _ in gen:
+                n_train_batches = train_set_x.get_value(borrow=True).shape[0]
+                n_train_batches /= batch_size
+                scores += [train_score_i(i) for i in xrange(n_train_batches)]
+            return scores
 
         # Create a function that scans the entire validation set
         def valid_score(gen):
@@ -360,208 +387,39 @@ class DBN(object):
                 scores += [test_score_i(i) for i in xrange(n_test_batches)]
             return scores
 
-        # # Create a function that gets prediction probas
-        # def submission_preds(gen):
-        #     predict_probas = []
-        #     for _ in gen:
-        #         n_submission_batches = submission_set_x.get_value(
-        #             borrow=True).shape[0]
-        #         n_submission_batches /= batch_size
-        #         predict_probas += [
-        #             submission_predict_proba_i(i) for i in xrange(
-        #                 n_submission_batches)]
-        #     return predict_probas
+        # Create a function that gets prediction probas
+        def train_preds(gen):
+            predict_probas = None
+            for _ in gen:
+                n_train_batches = train_set_x.get_value(
+                    borrow=True).shape[0]
+                n_train_batches /= batch_size
+                for i in xrange(n_train_batches):
+                    if predict_probas is None:
+                        predict_probas = train_predict_proba_i(i)
+                    else:
+                        predict_probas = numpy.concatenate((
+                            predict_probas,
+                            train_predict_proba_i(i),
+                        ), axis=0)
+            return predict_probas
 
-        return train_fn, valid_score, test_score
+        # Create a function that gets prediction probas
+        def submission_preds(gen):
+            predict_probas = None
+            for _ in gen:
+                n_submission_batches = submission_set_x.get_value(
+                    borrow=True).shape[0]
+                n_submission_batches /= batch_size
+                for i in xrange(n_submission_batches):
+                    if predict_probas is None:
+                        predict_probas = submission_predict_proba_i(i)
+                    else:
+                        predict_probas = numpy.concatenate((
+                            predict_probas,
+                            submission_predict_proba_i(i),
+                        ), axis=0)
+            return predict_probas
 
-
-def test_DBN(finetune_lr=0.1, pretraining_epochs=100,
-             pretrain_lr=0.01, k=1, training_epochs=1000,
-             dataset='mnist.pkl.gz', batch_size=5):
-    """
-    Demonstrates how to train and test a Deep Belief Network.
-
-    This is demonstrated on MNIST.
-
-    :type finetune_lr: float
-    :param finetune_lr: learning rate used in the finetune stage
-    :type pretraining_epochs: int
-    :param pretraining_epochs: number of epoch to do pretraining
-    :type pretrain_lr: float
-    :param pretrain_lr: learning rate to be used during pre-training
-    :type k: int
-    :param k: number of Gibbs steps in CD/PCD
-    :type training_epochs: int
-    :param training_epochs: maximal number of iterations ot run the optimizer
-    :type dataset: string
-    :param dataset: path the the pickled dataset
-    :type batch_size: int
-    :param batch_size: the size of a minibatch
-    """
-    batch_size = 20
-    total_size = 0
-
-    datasets = load_data(dataset)
-
-    train_set_x, train_set_y = datasets[0]
-    tsx = train_set_x.eval()
-    valid_set_x, valid_set_y = datasets[1]
-    test_set_x, test_set_y = datasets[2]
-
-    # numpy random generator
-    # noinspection PyUnresolvedReferences
-    numpy_rng = numpy.random.RandomState(123)
-    # theano random generator
-    theano_rng = RandomStreams(numpy_rng.randint(2 ** 30))
-    print '... building the model'
-    # construct the Deep Belief Network
-    dbn = DBN(n_ins=28 * 28, hidden_layers_sizes=[1000, 1000, 1000], n_outs=10)
-
-    # start-snippet-2
-    #########################
-    # PRETRAINING THE MODEL #
-    #########################
-
-    pieces = 100
-    csize = math.ceil(tsx.shape[0]/pieces)
-    piece = []
-    for i in range(pieces):
-        piece.append(tsx[int(i*csize):int((i+1)*csize)])
-
-    print '... pre-training the model'
-    start_time = time.clock()
-    ## Pre-train layer-wise
-    for i in xrange(dbn.n_layers):
-        print '... getting the pretraining function'
-        pretraining_fns = dbn.pretraining_function(
-            train_set_x, batch_size, k, i, numpy_rng, theano_rng)
-
-        # go through pretraining epochs
-        for epoch in xrange(pretraining_epochs):
-            start = time.clock()
-            # go through the training set
-            c = []
-
-            for p in piece:
-                if epoch == 0:
-                    total_size += p.shape[0]
-
-                # compute number of minibatches for training, validation and testing
-                train_set_x.set_value(p)
-                n_train_batches = p.shape[0] / batch_size
-                for batch_index in xrange(n_train_batches):
-                    c.append(
-                        pretraining_fns[i](index=batch_index, lr=pretrain_lr)
-                    )
-
-            print(
-                'Pre-training layer {}, epoch {}, cost {}, elapsed {}'.format(
-                    i, epoch, numpy.mean(c), time.clock() - start
-                )
-            )
-
-    end_time = time.clock()
-    # end-snippet-2
-    print >> sys.stderr, ('The pretraining code for file ' +
-                          os.path.split(__file__)[1] +
-                          ' ran for %.2fm' % ((end_time - start_time) / 60.))
-    ########################
-    # FINETUNING THE MODEL #
-    ########################
-
-    dbn.create_output_layer()
-
-    # get the training, validation and testing function for the model
-    print '... getting the finetuning functions'
-    train_fn, validate_model, test_model = dbn.build_finetune_functions(
-        datasets=datasets,
-        batch_size=batch_size,
-        learning_rate=finetune_lr
-    )
-
-    print '... finetuning the model'
-    # early-stopping parameters
-    # look as this many examples regardless
-    patience = 4 * (total_size/batch_size)
-    patience_increase = 2.    # wait this much longer when a new best is
-                              # found
-    improvement_threshold = 0.995  # a relative improvement of this much is
-                                   # considered significant
-    validation_frequency = min(n_train_batches, patience / 2)
-                                  # go through this many
-                                  # minibatches before checking the network
-                                  # on the validation set; in this case we
-                                  # check every epoch
-
-    best_validation_loss = numpy.inf
-    test_score = 0.
-    start_time = time.clock()
-
-    done_looping = False
-    epoch = 0
-
-    while (epoch < training_epochs) and (not done_looping):
-        epoch = epoch + 1
-        for minibatch_index in xrange(n_train_batches):
-
-            minibatch_avg_cost = train_fn(minibatch_index)
-            iter = (epoch - 1) * n_train_batches + minibatch_index
-
-            if (iter + 1) % validation_frequency == 0:
-
-                validation_losses = validate_model()
-                this_validation_loss = numpy.mean(validation_losses)
-                print(
-                    'epoch %i, minibatch %i/%i, validation error %f %%'
-                    % (
-                        epoch,
-                        minibatch_index + 1,
-                        n_train_batches,
-                        this_validation_loss * 100.
-                    )
-                )
-
-                # if we got the best validation score until now
-                if this_validation_loss < best_validation_loss:
-
-                    #improve patience if loss improvement is good enough
-                    if (
-                        this_validation_loss < best_validation_loss *
-                        improvement_threshold
-                    ):
-                        patience = max(patience, iter * patience_increase)
-
-                    # save best validation score and iteration number
-                    best_validation_loss = this_validation_loss
-                    best_iter = iter
-
-                    # test it on the test set
-                    test_losses = test_model()
-                    test_score = numpy.mean(test_losses)
-                    print(('     epoch %i, minibatch %i/%i, test error of '
-                           'best model %f %%') %
-                          (epoch, minibatch_index + 1, n_train_batches,
-                           test_score * 100.))
-
-            if patience <= iter:
-                done_looping = True
-                break
-
-    end_time = time.clock()
-    print(
-        (
-            'Optimization complete with best validation score of %f %%, '
-            'obtained at iteration %i, '
-            'with test performance %f %%'
-        ) % (best_validation_loss * 100., best_iter + 1, test_score * 100.)
-    )
-    print >> sys.stderr, ('The fine tuning code for file ' +
-                          os.path.split(__file__)[1] +
-                          ' ran for %.2fm' % ((end_time - start_time)
-                                              / 60.))
-
-
-if __name__ == '__main__':
-    test_DBN()
-
-
+        return train_fn, train_score, valid_score, test_score, \
+            train_preds, submission_preds
