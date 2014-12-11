@@ -78,20 +78,41 @@ def load_pretrain_layer(layer_num, settings):
 
 
 def load_finetuning(settings, klass_num):
-    fname = 'data/finetuning/{}-{}.pkl.gz'.format(
-        settings.finetuning_fname(), klass_num
-    )
-    if os.path.exists(fname):
-        with gzip.open(fname, 'rb') as ifile:
-            data = pickle.load(ifile)
-            dbn = data[0]
-            dbn.hidden_layer_sizes = \
-                [hl.num_nodes for hl in settings.hidden_layers]
-            settings = data[1]
-            epochs = data[2]
-            return dbn, settings, epochs
-    else:
+    pth = 'data/finetuning'
+    files = [f for f in listdir(pth) if isfile(join(pth, f))]
+    if len(files) <= 0:
         return None
+
+    this_run_epochs = settings.finetuning.epochs
+
+    files.sort(reverse=True)
+    fname, epoch = None, None
+    for f in files:
+        epoch = int([m.group() for m in re.finditer('\d+', f)][-1])
+        if epoch > this_run_epochs:
+            continue
+
+        fname = '{}-{}-{}.pkl.gz'.format(
+            settings.finetuning_fname(),
+            klass_num,
+            epoch
+        )
+        if settings.finetuning_fname() in f:
+            fname = '{}/{}'.format(pth, fname)
+            break
+
+    if not os.path.exists(fname):
+        return None
+
+    with gzip.open(fname, 'rb') as ifile:
+        data = pickle.load(ifile)
+        dbn = data[0]
+        dbn.hidden_layer_sizes = \
+            [hl.num_nodes for hl in settings.hidden_layers]
+        settings_bak = settings
+        settings = data[1]
+        settings.finetuning.epochs = settings_bak.finetuning.epochs
+        return dbn, settings, epoch
 
 
 def load_best_finetuning(settings, klass_num):

@@ -248,7 +248,7 @@ def test_DBN():
         HiddenLayerSettings(500, 1, 0.01)
     ]
     settings.batch_size = 5
-    settings.finetuning = FinetuningSettings(1, 0.1)
+    settings.finetuning = FinetuningSettings(2, 0.1)
     settings.chunks = ChunkSettings(3, 1, 1)
 
     train_len = 0

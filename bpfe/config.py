@@ -304,7 +304,6 @@ class FinetuningSettings(object):
             self._patience = max(self.patience, patience)
         else:
             self._patience = patience
-        print('patience', self._patience)
 
     @property
     def patience_increase(self):
@@ -313,6 +312,11 @@ class FinetuningSettings(object):
     @property
     def minimum_improvement(self):
         return self.best_validation_loss * self.improvement_threshold
+
+    def filename(self):
+        return '{}'.format(
+            self.learning_rate
+        )
 
     def __str__(self):
         return '{}-{}'.format(
@@ -522,11 +526,13 @@ class Settings(object):
             )
 
     def finetune_string(self):
-        return '{}-{}-{}-{}'.format(
+        hl = '-'.join([str(i.epochs) for i in self.hidden_layers])
+        return '{}-{}-{}-{}-{}'.format(
             self.batch_size,
             self.k,
             self.chunks,
-            self.finetuning
+            self.finetuning.filename(),
+            hl
         )
 
     def pretrain_fname(self, layer_num):
