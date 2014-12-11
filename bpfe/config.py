@@ -220,6 +220,12 @@ class HiddenLayerSettings(object):
         assert isinstance(value, float)
         self._learning_rate = value
 
+    def filename(self):
+        return '{}-{}'.format(
+            self.num_nodes,
+            self.learning_rate
+        )
+
     def __str__(self):
         return '{}-{}-{}'.format(
             self.num_nodes,
@@ -496,12 +502,24 @@ class Settings(object):
         return self.train_batches
 
     def pretrain_string(self, layer_num):
-        return '{}-{}-{}-{}'.format(
-            self.batch_size,
-            self.k,
-            self.chunks,
-            self.hidden_layers[layer_num]
-        )
+        pre_hl = '-'.join([
+            str(i.epochs) for i in self.hidden_layers[:layer_num]
+        ])
+        if pre_hl != '':
+            return '{}-{}-{}-{}-{}'.format(
+                self.batch_size,
+                self.k,
+                self.chunks,
+                pre_hl,
+                self.hidden_layers[layer_num].filename()
+            )
+        else:
+            return '{}-{}-{}-{}'.format(
+                self.batch_size,
+                self.k,
+                self.chunks,
+                self.hidden_layers[layer_num].filename()
+            )
 
     def finetune_string(self):
         return '{}-{}-{}-{}'.format(

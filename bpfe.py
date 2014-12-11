@@ -243,7 +243,7 @@ def test_DBN():
     settings.version = 3.0
     settings.k = 1
     settings.hidden_layers = [
-        HiddenLayerSettings(500, 1, 0.01),
+        HiddenLayerSettings(500, 2, 0.01),
         HiddenLayerSettings(500, 1, 0.01),
         HiddenLayerSettings(500, 1, 0.01)
     ]
@@ -407,12 +407,14 @@ def _run_with_params(settings):
     ## Pre-train layer-wise
     for layer_idx in xrange(dbn.n_layers):
         cache_pretrain = cache.load_pretrain_layer(layer_idx, settings)
+        resume_epoch = None
         if cache_pretrain is not None:
             print('layer {} already exists on disk, loading ...'.format(
                 layer_idx
             ))
-            dbn, settings = cache_pretrain
-            continue
+            dbn, settings, resume_epoch = cache_pretrain
+            if resume_epoch >= settings.hidden_layers[layer_idx].epochs - 1:
+                continue
 
         print('getting the pre-training function for layer {} ...'.format(
             layer_idx
@@ -428,6 +430,9 @@ def _run_with_params(settings):
 
         # go through pretraining epochs
         for epoch in xrange(settings.hidden_layers[layer_idx].epochs):
+            if resume_epoch is not None and resume_epoch >= epoch:
+                continue
+
             start = time.clock()
             # go through the training set
             c = []
@@ -454,7 +459,7 @@ def _run_with_params(settings):
                 )
             )
 
-        cache.save_pretrain_layer(dbn, layer_idx, settings)
+            cache.save_pretrain_layer(dbn, layer_idx, settings, epoch)
 
     # print('ts', settings.train_size)
 
@@ -598,8 +603,7 @@ def finetune_class(dbn, datasets, settings, klass, klass_num):
                             print('... saving current best model for {}'.format(
                                 klass
                             ))
-                            cache.save_best_finetuning(
-                                dbn, settings, klass_num, epoch)
+                            cache.save_best_finetuning(dbn, settings, klass_num)
                             settings.finetuning.best_test_loss = test_loss
 
                         if False:
@@ -654,7 +658,7 @@ def try_predict_test(datasets, settings, klass, klass_num):
         print('no "best" model for class "{}"'.format(klass))
         return
 
-    dbn, settings, epoch = val
+    dbn, settings = val
     train_fn, train_model, validate_model, test_model, \
         train_pred, test_pred, submission_pred = \
         dbn.build_finetune_functions(
