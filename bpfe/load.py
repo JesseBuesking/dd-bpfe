@@ -66,7 +66,7 @@ def generate_rows(file_path, seed, amt):
 
 
 def split_test_train(data):
-    batch_size = 10000
+    batch_size = 20000
     validate_data = data[:batch_size]
     data = data[batch_size:]
     test_data = data[:batch_size]
@@ -102,30 +102,27 @@ def store_raw(seed=1, verbose=False):
     store_in_chunks(train, 'train')
 
 
-def gen_validate(num_chunks=None, batch_size=None):
-    for data in _gen_name('validate', num_chunks, batch_size):
+def gen_validate(settings, batch_size=None):
+    for data in _gen_name('validate', settings.chunks.validate, batch_size):
         yield data
 
 
-def gen_test(num_chunks=None, batch_size=None):
-    for data in _gen_name('test', num_chunks, batch_size):
+def gen_test(settings, batch_size=None):
+    for data in _gen_name('test', settings.chunks.test, batch_size):
         yield data
 
 
-def gen_train(num_chunks=None, batch_size=None):
-    for data in _gen_name('train', num_chunks, batch_size):
+def gen_train(settings, batch_size=None):
+    for data in _gen_name('train', settings.chunks.train, batch_size):
             yield data
 
 
-def gen_submission(num_chunks=None, batch_size=None):
-    for data in _gen_name('submission', num_chunks, batch_size):
+def gen_submission(settings, batch_size=None):
+    for data in _gen_name('submission', settings.chunks.submission, batch_size):
         yield data
 
 
-def _gen_name(name, num_chunks=None, batch_size=None):
-    if num_chunks is None:
-        num_chunks = sys.maxint
-
+def _gen_name(name, num_chunks, batch_size=None):
     if batch_size is None:
         batch_size = sys.maxint
 
@@ -156,15 +153,17 @@ def _gen_name(name, num_chunks=None, batch_size=None):
             yield data
 
 
-def load_vectorizers(num_chunks):
+def load_vectorizers(settings):
     print('loading vectorizers')
-    fname = 'data/vectorizers-{}.pkl'.format(num_chunks)
+    fname = 'data/vectorizers-{}.pkl'.format(
+        settings.chunks
+    )
     if os.path.exists(fname):
         with open(fname, 'rb') as ifile:
             v = pickle.load(ifile)
     else:
-        print('creating vectorizers for {} chunks'.format(num_chunks))
-        v = get_vectorizers(num_chunks)
+        print('creating vectorizers for {} chunks'.format(settings.chunks))
+        v = get_vectorizers(settings)
         with open(fname, 'wb') as ifile:
             pickle.dump(v, ifile, -1)
 

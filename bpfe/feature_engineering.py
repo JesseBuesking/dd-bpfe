@@ -62,7 +62,7 @@ def find_ngrams(input_list, n):
     return list(zip(*[input_list[i:] for i in range(n)]))
 
 
-def get_vectorizers(num_chunks):
+def get_vectorizers(settings):
     text_attributes = [
         'object_description', 'program_description',
         'subfund_description', 'job_title_description',
@@ -74,7 +74,7 @@ def get_vectorizers(num_chunks):
     v = dict()
 
     for attr in text_attributes:
-        v[attr] = text_vectorizer(num_chunks, attr)
+        v[attr] = text_vectorizer(settings, attr)
 
     # i want 100% to be included, otherwise it gets lumped with the garbage
     # above 100, so append 100.01)
@@ -86,7 +86,7 @@ def get_vectorizers(num_chunks):
         [sys.maxint]
     ), axis=1)
 
-    v['fte'] = bucket_vectorizer(num_chunks, 'fte', fte_buckets)
+    v['fte'] = bucket_vectorizer(settings, 'fte', fte_buckets)
     # [
     #     (None, 0.0),
     #     (0.0, 5.0),
@@ -122,7 +122,7 @@ def get_vectorizers(num_chunks):
         [sys.maxint]
     ), axis=1)
 
-    v['total'] = bucket_vectorizer(num_chunks, 'total', total_buckets)
+    v['total'] = bucket_vectorizer(settings, 'total', total_buckets)
 
     return v
 
@@ -135,23 +135,23 @@ def text_vectorizer_transform(v, values, _):
     return v.transform(_text_vectorizer_prep(values))
 
 
-def text_vectorizer(num_chunks, attr):
+def text_vectorizer(settings, attr):
     import bpfe.load as load
     v = TextVectorizer()
 
-    def get_values(generator):
+    def get_values(generator, settings):
         ret = []
-        for data in generator(num_chunks):
+        for data in generator(settings):
             for row, label in data:
                 value = getattr(row, attr)
                 ret.append(_text_vectorizer_prep(value))
         return ret
 
     values = \
-        get_values(load.gen_train) + \
-        get_values(load.gen_validate) + \
-        get_values(load.gen_test) + \
-        get_values(load.gen_submission)
+        get_values(load.gen_train, settings) + \
+        get_values(load.gen_validate, settings) + \
+        get_values(load.gen_test, settings) + \
+        get_values(load.gen_submission, settings)
 
     v.fit(values)
     return v, None, 'text_vectorizer_transform'
@@ -173,23 +173,23 @@ def bucket_vectorizer_transform(v, value, buckets):
     return v.transform(_bucket_vectorizer_prep(value, buckets))
 
 
-def bucket_vectorizer(num_chunks, attr, buckets):
+def bucket_vectorizer(settings, attr, buckets):
     import bpfe.load as load
     v = BinaryVectorizer()
 
-    def get_values(generator):
+    def get_values(generator, settings):
         ret = []
-        for data in generator(num_chunks):
+        for data in generator(settings):
             for row, label in data:
                 value = getattr(row, attr)
                 ret.append(_bucket_vectorizer_prep(value, buckets))
         return ret
 
     values = \
-        get_values(load.gen_train) + \
-        get_values(load.gen_validate) + \
-        get_values(load.gen_test) + \
-        get_values(load.gen_submission)
+        get_values(load.gen_train, settings) + \
+        get_values(load.gen_validate, settings) + \
+        get_values(load.gen_test, settings) + \
+        get_values(load.gen_submission, settings)
 
     v.fit(values)
     return v, buckets, 'bucket_vectorizer_transform'

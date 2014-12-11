@@ -22,12 +22,20 @@ def save_pretrain_layer(dbn, layer_num, settings):
         pickle.dump((dbn, settings), ifile, -1)
 
 
-def save_finetuning(dbn, settings, klass_num):
+def save_finetuning(dbn, settings, klass_num, epochs):
     fname = 'data/finetuning/{}-{}.pkl.gz'.format(
         settings.finetuning_fname(), klass_num
     )
     with gzip.open(fname, 'wb') as ifile:
-        pickle.dump((dbn, settings), ifile, -1)
+        pickle.dump((dbn, settings, epochs), ifile, -1)
+
+
+def save_best_finetuning(dbn, settings, klass_num, epochs):
+    fname = 'data/best-finetuning/{}-{}.pkl.gz'.format(
+        settings.finetuning_fname(), klass_num
+    )
+    with gzip.open(fname, 'wb') as ifile:
+        pickle.dump((dbn, settings, epochs), ifile, -1)
 
 
 def load_pretrain_layer(layer_num, settings):
@@ -59,7 +67,25 @@ def load_finetuning(settings, klass_num):
             dbn.hidden_layer_sizes = \
                 [hl.num_nodes for hl in settings.hidden_layers]
             settings = data[1]
-            return dbn, settings
+            epochs = data[2]
+            return dbn, settings, epochs
+    else:
+        return None
+
+
+def load_best_finetuning(settings, klass_num):
+    fname = 'data/best-finetuning/{}-{}.pkl.gz'.format(
+        settings.finetuning_fname(), klass_num
+    )
+    if os.path.exists(fname):
+        with gzip.open(fname, 'rb') as ifile:
+            data = pickle.load(ifile)
+            dbn = data[0]
+            dbn.hidden_layer_sizes = \
+                [hl.num_nodes for hl in settings.hidden_layers]
+            settings = data[1]
+            epochs = data[2]
+            return dbn, settings, epochs
     else:
         return None
 

@@ -1,4 +1,5 @@
-import os
+
+
 import numpy
 
 
@@ -232,6 +233,10 @@ class FinetuningSettings(object):
     def __init__(self, epochs, learning_rate):
         self.epochs = epochs
         self.learning_rate = learning_rate
+        self.best_validation_loss = numpy.inf
+        self.best_test_loss = numpy.inf
+        self.best_iteration = 0
+        self._patience = None
 
     @property
     def epochs(self):
@@ -251,6 +256,58 @@ class FinetuningSettings(object):
         assert isinstance(value, float)
         self._learning_rate = value
 
+    @property
+    def best_validation_loss(self):
+        return self._best_validation_loss
+
+    @best_validation_loss.setter
+    def best_validation_loss(self, value):
+        assert isinstance(value, float)
+        self._best_validation_loss = value
+
+    @property
+    def best_test_loss(self):
+        return self._best_test_loss
+
+    @best_test_loss.setter
+    def best_test_loss(self, value):
+        assert isinstance(value, float)
+        self._best_test_loss = value
+
+    @property
+    def best_iteration(self):
+        return self._best_iteration
+
+    @best_iteration.setter
+    def best_iteration(self, value):
+        assert isinstance(value, int)
+        self._best_iteration = value
+
+    @property
+    def improvement_threshold(self):
+        return 0.995
+
+    @property
+    def patience(self):
+        return self._patience
+
+    @patience.setter
+    def patience(self, patience):
+        assert isinstance(patience, float)
+        if isinstance(self.patience, float):
+            self._patience = max(self.patience, patience)
+        else:
+            self._patience = patience
+        print('patience', self._patience)
+
+    @property
+    def patience_increase(self):
+        return 2.0
+
+    @property
+    def minimum_improvement(self):
+        return self.best_validation_loss * self.improvement_threshold
+
     def __str__(self):
         return '{}-{}'.format(
             self.epochs,
@@ -265,11 +322,14 @@ class FinetuningSettings(object):
 
 class ChunkSettings(object):
 
-    def __init__(self, train, validate, test):
+    def __init__(self, train, validate, test, submission=None):
         self.train = train
         self.validate = validate
         self.test = test
-        self.submission = train
+        if submission is None:
+            self.submission = train
+        else:
+            self.submission = submission
 
     @property
     def train(self):
@@ -325,6 +385,11 @@ class ChunkSettings(object):
 
 class Settings(object):
 
+    def __init__(self):
+        self._patience = None
+        self._train_size = None
+        self._batch_size = None
+
     @property
     def version(self):
         return self._version
@@ -362,6 +427,8 @@ class Settings(object):
     def train_size(self, value):
         assert isinstance(value, int)
         self._train_size = value
+        if isinstance(self.batch_size, int):
+            self.finetuning.patience = 4. * (self.train_size / self.batch_size)
 
     @property
     def num_cols(self):
@@ -380,6 +447,8 @@ class Settings(object):
     def batch_size(self, value):
         assert isinstance(value, int)
         self._batch_size = value
+        if isinstance(self.train_size, int):
+            self.finetuning.patience = 4 * (self.train_size / self.batch_size)
 
     @property
     def hidden_layers(self):
@@ -417,6 +486,14 @@ class Settings(object):
     def chunks(self, value):
         assert isinstance(value, ChunkSettings)
         self._chunks = value
+
+    @property
+    def train_batches(self):
+        return self.train_size / self.batch_size
+
+    @property
+    def validation_frequency(self):
+        return self.train_batches
 
     def pretrain_string(self, layer_num):
         return '{}-{}-{}-{}'.format(

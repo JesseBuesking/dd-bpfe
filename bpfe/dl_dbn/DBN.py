@@ -237,7 +237,7 @@ class DBN(object):
         rbm = self.create_hidden_layer(layer_num, numpy_rng, theano_rng)
 
         # get the cost and the updates list
-        # using CD-k here (persisent=None) for training each RBM.
+        # using CD-k here (persistent=None) for training each RBM.
         # TODO: change cost function to reconstruction error
         cost, updates = rbm.get_cost_updates(
             learning_rate, persistent=None, k=k)
@@ -350,6 +350,16 @@ class DBN(object):
             }
         )
 
+        test_predict_proba_i = theano.function(
+            [index],
+            self.logLayer.predict_proba(),
+            givens={
+                self.x: test_set_x[
+                    index * batch_size: (index + 1) * batch_size
+                ]
+            }
+        )
+
         submission_predict_proba_i = theano.function(
             [index],
             self.logLayer.predict_proba(),
@@ -405,6 +415,23 @@ class DBN(object):
             return predict_probas
 
         # Create a function that gets prediction probas
+        def test_preds(gen):
+            predict_probas = None
+            for _ in gen:
+                n_test_batches = test_set_x.get_value(
+                    borrow=True).shape[0]
+                n_test_batches /= batch_size
+                for i in xrange(n_test_batches):
+                    if predict_probas is None:
+                        predict_probas = test_predict_proba_i(i)
+                    else:
+                        predict_probas = numpy.concatenate((
+                            predict_probas,
+                            test_predict_proba_i(i),
+                        ), axis=0)
+            return predict_probas
+
+        # Create a function that gets prediction probas
         def submission_preds(gen):
             predict_probas = None
             for _ in gen:
@@ -422,4 +449,4 @@ class DBN(object):
             return predict_probas
 
         return train_fn, train_score, valid_score, test_score, \
-            train_preds, submission_preds
+            train_preds, test_preds, submission_preds

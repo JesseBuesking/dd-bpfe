@@ -39,6 +39,9 @@ import theano
 import theano.tensor as T
 
 
+debug = False
+
+
 class LogisticRegression(object):
     """Multi-class Logistic Regression Class
 
@@ -94,11 +97,24 @@ class LogisticRegression(object):
         # x is a matrix where row-j  represents input training sample-j
         # b is a vector where element-k represent the free parameter of hyper
         # plain-k
-        self.p_y_given_x = T.nnet.softmax(T.dot(input_vector, self.W) + self.b)
+        if debug:
+            self.p_y_given_x_raw = \
+                T.nnet.softmax(T.dot(input_vector, self.W) + self.b)
+            self.p_y_given_x = theano.printing.Print('p_y_given_x')(
+                self.p_y_given_x_raw
+            )
+        else:
+            self.p_y_given_x = \
+                T.nnet.softmax(T.dot(input_vector, self.W) + self.b)
 
         # symbolic description of how to compute prediction as class whose
         # probability is maximal
-        self.y_pred = T.argmax(self.p_y_given_x, axis=1)
+        if False:
+            pygx = theano.printing.Print('pygx')(self.p_y_given_x)
+            am = theano.printing.Print('am')(T.argmax(pygx, axis=1))
+            self.y_pred = am
+        else:
+            self.y_pred = T.argmax(self.p_y_given_x, axis=1)
         # end-snippet-1
 
         # parameters of the model
@@ -134,7 +150,18 @@ class LogisticRegression(object):
         # the mean (across minibatch examples) of the elements in v,
         # i.e., the mean log-likelihood across the minibatch.
         # noinspection PyUnresolvedReferences
-        return -T.mean(T.log(self.p_y_given_x)[T.arange(y.shape[0]), y])
+        l = T.log(self.p_y_given_x)
+        t_arange = T.arange(y.shape[0])
+        if debug:
+            l_printed = theano.printing.Print('l')(l)
+            t_arange_printed = theano.printing.Print('t_arange')(t_arange)
+            y_printed = theano.printing.Print('y')(y)
+            mn_printed = -T.mean(l_printed[t_arange_printed, y_printed])
+            val_printed = theano.printing.Print('mean')(mn_printed)
+            return val_printed
+        else:
+            return -T.mean(l[t_arange, y])
+
         # end-snippet-2
 
     def errors(self, y):
@@ -159,7 +186,17 @@ class LogisticRegression(object):
         if y.dtype.startswith('int'):
             # the T.neq operator returns a vector of 0s and 1s, where 1
             # represents a mistake in prediction
-            return T.mean(T.neq(self.y_pred, y))
+            if False:
+                y_pred_printed = theano.printing.Print('y_pred')(self.y_pred)
+                y_printed = theano.printing.Print('y')(y)
+                neq_printed = theano.printing.Print('neq')(T.neq(
+                    y_pred_printed, y_printed
+                ))
+                mean_printed = theano.printing.Print('mean')(T.mean(
+                    neq_printed))
+                return mean_printed
+            else:
+                return T.mean(T.neq(self.y_pred, y))
         else:
             raise NotImplementedError()
 

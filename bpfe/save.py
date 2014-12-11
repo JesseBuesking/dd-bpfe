@@ -14,9 +14,6 @@ except:
     import pickle
 
 
-TRAIN_CHUNKS = 1
-
-
 def to_np_array(vectzers, data):
     attributes = [
         'object_description', 'program_description',
@@ -53,7 +50,10 @@ def to_np_array(vectzers, data):
 
         l = []
         for klass_num in range(len(KLASS_LABEL_INFO)):
-            l.append(label.to_klass_num(klass_num))
+            klass_num = label.to_klass_num(klass_num)
+            if klass_num > 37:
+                raise Exception('whaaaaa')
+            l.append(klass_num)
         labels.append(l)
 
     if len(labels) > 0:
@@ -65,23 +65,25 @@ def to_np_array(vectzers, data):
     return vecs, labels
 
 
-def vectorize(generator, num_chunks, batch_size):
-    vectorizers = load.load_vectorizers(TRAIN_CHUNKS)
+def vectorize(generator, settings, batch_size):
+    vectorizers = load.load_vectorizers(settings)
     data_len, index = 0, 0
     full_data, full_labels = None, None
-    load_size = 1000
-    assert load_size <= batch_size
 
-    for data in generator(num_chunks, load_size):
+    for data in generator(settings, batch_size):
         v, l = to_np_array(vectorizers, data)
         if full_data is None:
+            # noinspection PyUnresolvedReferences
             full_data = np.ndarray(
                 shape=(batch_size, v.shape[1]),
                 dtype=np.int32
             )
+        # noinspection PyUnresolvedReferences
         data_len += v.shape[0]
 
+        # noinspection PyUnresolvedReferences
         start = index * v.shape[0]
+        # noinspection PyUnresolvedReferences
         end = start + v.shape[0]
         full_data[start:end, :] = v
         if l is not None:
@@ -93,7 +95,8 @@ def vectorize(generator, num_chunks, batch_size):
             full_labels[start:end] = l
 
         done = False
-        if v.shape[0] < load_size:
+        # noinspection PyUnresolvedReferences
+        if v.shape[0] < batch_size:
             full_data = full_data[:data_len, :]
             if full_labels is not None:
                 full_labels = full_labels[:data_len]
@@ -108,23 +111,34 @@ def vectorize(generator, num_chunks, batch_size):
         data_len, index = 0, 0
 
 
-def train(num_chunks):
-    return _load_vectors('train', num_chunks)
+def full_train(settings):
+    for tup in _load_vectors('train', settings):
+        yield tup
+    for tup in _load_vectors('validate', settings):
+        yield tup
+    for tup in _load_vectors('test', settings):
+        yield tup
+    for tup in _load_vectors('submission', settings):
+        yield tup
 
 
-def validate(num_chunks):
-    return _load_vectors('validate', num_chunks)
+def train(settings):
+    return _load_vectors('train', settings)
 
 
-def test(num_chunks):
-    return _load_vectors('test', num_chunks)
+def validate(settings):
+    return _load_vectors('validate', settings)
 
 
-def submission(num_chunks):
-    return _load_vectors('submission', num_chunks)
+def test(settings):
+    return _load_vectors('test', settings)
 
 
-def _save_vectors(name, num_chunks):
+def submission(settings):
+    return _load_vectors('submission', settings)
+
+
+def _save_vectors(name, settings):
     batch_size = 5000
 
     if name == 'train':
@@ -138,28 +152,39 @@ def _save_vectors(name, num_chunks):
     else:
         raise Exception('unexpected name {}'.format(name))
 
-    fname = 'data/{}-vec-{}-{}-{}.pkl.gz'.format(
-        name, batch_size, num_chunks, TRAIN_CHUNKS
+    fname = 'data/{}-vec-{}-{}.pkl.gz'.format(
+        name, batch_size, settings.chunks
     )
     with gzip.open(fname, 'wb') as ifile:
-        for data, labels in vectorize(loader, num_chunks, batch_size):
+        for data, labels in vectorize(loader, settings, batch_size):
+            if labels is not None:
+                for row in labels:
+                    if max(row) > 37:
+                        raise Exception('name: {} row: {}'.format(name, row))
+            # noinspection PyUnresolvedReferences
             extra_bits = 8 - (data.shape[1] % 8)
             data = np.packbits(data, axis=1)
             pickle.dump((extra_bits, data, labels), ifile)
 
 
-def _load_vectors(name, num_chunks):
+def _load_vectors(name, settings):
     batch_size = 5000
-    fname = 'data/{}-vec-{}-{}-{}.pkl.gz'.format(
-        name, batch_size, num_chunks, TRAIN_CHUNKS
+    fname = 'data/{}-vec-{}-{}.pkl.gz'.format(
+        name, batch_size, settings.chunks
     )
     if not os.path.exists(fname):
-        _save_vectors(name, num_chunks)
+        _save_vectors(name, settings)
 
     with gzip.open(fname, 'rb') as ifile:
         while True:
             try:
                 (extra_bits, data, labels) = pickle.load(ifile)
+                if labels is not None:
+                    for row in labels:
+                        if max(row) > 37:
+                            raise Exception(
+                                'name: {} row: {}'.format(name, row)
+                            )
                 data = np.unpackbits(data, axis=1)
                 data = data[:, :-extra_bits]
                 yield data, labels
