@@ -763,10 +763,10 @@ def try_predict_test(datasets, settings, klass, klass_num):
         idx += 1
     score /= 2.0
     print('sum of squares error: {:.4f}'.format(score/total_predictions))
-    print('matches {}/{} = {:.4f}%'.format(
+    print('matches {}/{} = {:.4f}% error rate'.format(
         matches,
         total_predictions,
-        matches / float(total_predictions)
+        (1 - matches / float(total_predictions)) * 100.0
     ))
 
     # with open(final_fname, 'wb') as ifile:
