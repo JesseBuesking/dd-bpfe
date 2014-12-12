@@ -1,5 +1,5 @@
-
-
+import gzip
+from itertools import izip
 import os
 from os.path import dirname
 import sys
@@ -10,7 +10,7 @@ from theano.tensor.shared_randomstreams import RandomStreams
 from bpfe import scoring, save, cache
 from bpfe.cache import load_stats
 from bpfe.config import FLAT_LABELS, KLASS_LABEL_INFO, Settings, \
-    HiddenLayerSettings, FinetuningSettings, ChunkSettings
+    HiddenLayerSettings, FinetuningSettings, ChunkSettings, LABELS
 from bpfe.dl_dbn.DBN import DBN
 import numpy
 import bpfe.load as load
@@ -59,6 +59,33 @@ def _get_np_array(shape, dtype):
 
     NP_ARRAY = np.empty(shape, dtype, order='C')
     return NP_ARRAY
+
+
+def create_datasets():
+    def shared_dataset():
+        # noinspection PyUnresolvedReferences
+        shared_x = theano.shared(
+            numpy.asarray([[]], dtype=theano.config.floatX),
+            borrow=True
+        )
+        # noinspection PyUnresolvedReferences
+        shared_y = theano.shared(
+            numpy.asarray([], dtype=theano.config.floatX),
+            borrow=True
+        )
+        return shared_x, shared_y
+
+    test_set_x, test_set_y = shared_dataset()
+    valid_set_x, valid_set_y = shared_dataset()
+    train_set_x, train_set_y = shared_dataset()
+    submission_set_x, submission_set_y = shared_dataset()
+    datasets = [
+        (train_set_x, train_set_y),
+        (valid_set_x, valid_set_y),
+        (test_set_x, test_set_y),
+        (submission_set_x, submission_set_y)
+    ]
+    return datasets
 
 
 def vectorize(generator, X, Y, settings, klass_num):
@@ -293,9 +320,12 @@ def test_DBN():
     #                         combos.append((ko, bso, hlso, hldo, flo, plo))
     # for ko, bso, hlso, hldo, flo, plo in combos:
     # hls = [hlso for _ in range(hldo)]
+
     start = time.clock()
     _run_with_params(settings)
     print('DURATION: {}'.format(time.clock() - start))
+
+    create_submission_file(settings)
 
     # settings_stats_fname = 'data/settings_stats.pkl'
     # if os.path.exists(settings_stats_fname):
@@ -335,29 +365,8 @@ def _run_with_params(settings):
 
     settings.train_size = 0
 
-    def shared_dataset():
-        # noinspection PyUnresolvedReferences
-        shared_x = theano.shared(
-            numpy.asarray([[]], dtype=theano.config.floatX),
-            borrow=True
-        )
-        # noinspection PyUnresolvedReferences
-        shared_y = theano.shared(
-            numpy.asarray([], dtype=theano.config.floatX),
-            borrow=True
-        )
-        return shared_x, shared_y
-
-    test_set_x, test_set_y = shared_dataset()
-    valid_set_x, valid_set_y = shared_dataset()
-    train_set_x, train_set_y = shared_dataset()
-    submission_set_x, submission_set_y = shared_dataset()
-    datasets = [
-        (train_set_x, train_set_y),
-        (valid_set_x, valid_set_y),
-        (test_set_x, test_set_y),
-        (submission_set_x, submission_set_y)
-    ]
+    datasets = create_datasets()
+    train_set_x, train_set_y = datasets[0]
 
     settings.train_size = 0
     settings.num_cols = 0
@@ -482,7 +491,6 @@ def _run_with_params(settings):
 
 
 def finetune(dbn, datasets, settings):
-
     # TODO since we're running a single class....
     with open('data/current-dbn.pkl', 'wb') as ifile:
         pickle.dump(dbn, ifile)
@@ -773,6 +781,106 @@ def try_predict_test(datasets, settings, klass, klass_num):
     # with open(settings_stats_fname, 'wb') as ifile:
     #     pickle.dump(settings_stats, ifile)
 
+
+def create_submission_file(settings):
+    datasets = create_datasets()
+
+    for klass, (klass_num, count) in KLASS_LABEL_INFO.items():
+        predict_submission(datasets, settings, klass, klass_num)
+
+    header = ['__'.join(i) for i in FLAT_LABELS]
+    headers = []
+    for i in header:
+        if ' ' in i:
+            i = '"{}"'.format(i)
+        headers.append(i)
+
+    header_line = ',' + ','.join(headers)
+
+    class_files = []
+
+    ordered_classes = sorted(LABELS.keys())
+    for klass in ordered_classes:
+        klass_num = KLASS_LABEL_INFO[klass][0]
+        class_files.append(
+            gzip.open('data/submission/{}-{}.csv.gz'.format(
+                settings.version,
+                int(klass_num)
+            ), 'r')
+        )
+
+    fname = 'data/submission/{}-final.csv.gz'.format(settings.version)
+    with gzip.open(fname, 'w') as ifile:
+        ifile.write(header_line + '\n')
+        for all_row in izip(*class_files):
+            current_id = None
+            full_row = []
+            for filerow in all_row:
+                filerow = filerow.strip()
+                values = filerow.split(',')
+                if current_id is None:
+                    current_id = values[0]
+                else:
+                    assert current_id == values[0]
+                full_row += values[1:]
+            row_string = '{},{}'.format(
+                current_id,
+                ','.join(full_row)
+            )
+
+            ifile.write(row_string + '\n')
+
+
+def predict_submission(datasets, settings, klass, klass_num):
+    (submission_set_x, submission_set_y) = datasets[3]
+
+    print('... loading best model for class "{}"'.format(klass))
+    val = cache.load_best_finetuning(settings, klass_num)
+    if val is None:
+        print('no "best" model for class "{}"'.format(klass))
+        return
+
+    dbn, settings = val
+    train_fn, train_model, validate_model, test_model, \
+        train_pred, test_pred, submission_pred = \
+        dbn.build_finetune_functions(
+            datasets=datasets,
+            batch_size=settings.batch_size,
+            learning_rate=settings.finetuning.learning_rate
+        )
+
+    predictions = submission_pred(vectorize(
+        save.submission,
+        submission_set_x,
+        submission_set_y,
+        settings,
+        klass_num
+    ))
+
+    num_predictions = len(predictions)
+    print(num_predictions)
+
+    deal_gen = load.gen_submission(settings, batch_size=num_predictions)
+
+    total_predictions, matches, misses, score, idx = 0, 0, 0, 0, 0
+    red = reduce(
+        lambda x, y: x + y,
+        [dg for dg in deal_gen],
+        []
+    )
+    print('submission rows: {}'.format(len(red)))
+    fname = 'data/submission/{}-{}.csv.gz'.format(settings.version, klass_num)
+    with gzip.open(fname, 'w') as ifile:
+        for data in red:
+            row = '{},{}'.format(
+                data[0].id,
+                ','.join(
+                    ['{:.12f}'.format(sub) for sub in predictions[idx]]
+                )
+            )
+            ifile.write(row + '\n')
+            idx += 1
+        print('final idx: {}'.format(idx))
 
 if __name__ == '__main__':
     # predict()

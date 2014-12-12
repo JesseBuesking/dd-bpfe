@@ -1,5 +1,6 @@
 """
 """
+import math
 
 import numpy
 
@@ -275,7 +276,7 @@ class DBN(object):
         (train_set_x, train_set_y) = datasets[0]
         (valid_set_x, valid_set_y) = datasets[1]
         (test_set_x, test_set_y) = datasets[2]
-        (submission_set_x, submission_set_y) = datasets[2]
+        (submission_set_x, submission_set_y) = datasets[3]
 
         index = T.lscalar('index')  # index to a [mini]batch
 
@@ -370,82 +371,52 @@ class DBN(object):
             }
         )
 
+        #### SCORING FUNCTIONS
+
         # Create a function that scans the entire train set
         def train_score(gen):
-            scores = []
-            for _ in gen:
-                n_train_batches = train_set_x.get_value(borrow=True).shape[0]
-                n_train_batches /= batch_size
-                scores += [train_score_i(i) for i in xrange(n_train_batches)]
-            return scores
+            return score(gen, train_set_x, train_score_i)
 
         # Create a function that scans the entire validation set
         def valid_score(gen):
-            scores = []
-            for _ in gen:
-                n_valid_batches = valid_set_x.get_value(borrow=True).shape[0]
-                n_valid_batches /= batch_size
-                scores += [valid_score_i(i) for i in xrange(n_valid_batches)]
-            return scores
+            return score(gen, valid_set_x, valid_score_i)
 
         # Create a function that scans the entire test set
         def test_score(gen):
+            return score(gen, test_set_x, test_score_i)
+
+        def score(gen, X, score_i):
             scores = []
             for _ in gen:
-                n_test_batches = test_set_x.get_value(borrow=True).shape[0]
-                n_test_batches /= batch_size
-                scores += [test_score_i(i) for i in xrange(n_test_batches)]
+                batches = X.get_value(borrow=True).shape[0]
+                batches = int(math.ceil(batches / float(batch_size)))
+                scores += [score_i(i) for i in xrange(batches)]
             return scores
 
-        # Create a function that gets prediction probas
+        #### PREDICTION PROBABILITY FUNCTIONS
+
         def train_preds(gen):
-            predict_probas = None
-            for _ in gen:
-                n_train_batches = train_set_x.get_value(
-                    borrow=True).shape[0]
-                n_train_batches /= batch_size
-                for i in xrange(n_train_batches):
-                    if predict_probas is None:
-                        predict_probas = train_predict_proba_i(i)
-                    else:
-                        predict_probas = numpy.concatenate((
-                            predict_probas,
-                            train_predict_proba_i(i),
-                        ), axis=0)
-            return predict_probas
+            return pred(gen, train_set_x, train_predict_proba_i)
 
-        # Create a function that gets prediction probas
         def test_preds(gen):
-            predict_probas = None
-            for _ in gen:
-                n_test_batches = test_set_x.get_value(
-                    borrow=True).shape[0]
-                n_test_batches /= batch_size
-                for i in xrange(n_test_batches):
-                    if predict_probas is None:
-                        predict_probas = test_predict_proba_i(i)
-                    else:
-                        predict_probas = numpy.concatenate((
-                            predict_probas,
-                            test_predict_proba_i(i),
-                        ), axis=0)
-            return predict_probas
+            return pred(gen, test_set_x, test_predict_proba_i)
 
-        # Create a function that gets prediction probas
         def submission_preds(gen):
+            return pred(gen, submission_set_x, submission_predict_proba_i)
+
+        def pred(gen, X, predict_proba_i):
             predict_probas = None
             for _ in gen:
-                n_submission_batches = submission_set_x.get_value(
-                    borrow=True).shape[0]
-                n_submission_batches /= batch_size
-                for i in xrange(n_submission_batches):
+                batches = X.get_value(borrow=True).shape[0]
+                batches = int(math.ceil(batches / float(batch_size)))
+                for i in xrange(batches):
                     if predict_probas is None:
-                        predict_probas = submission_predict_proba_i(i)
+                        predict_probas = predict_proba_i(i)
                     else:
-                        predict_probas = numpy.concatenate((
-                            predict_probas,
-                            submission_predict_proba_i(i),
-                        ), axis=0)
+                        predict_probas = numpy.concatenate(
+                            (predict_probas, predict_proba_i(i)),
+                            axis=0
+                        )
             return predict_probas
 
         return train_fn, train_score, valid_score, test_score, \
