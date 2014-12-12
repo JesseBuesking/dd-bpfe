@@ -18,7 +18,7 @@ import os
 
 def save_pretrain_layer(dbn, layer_num, settings, epoch):
     fname = 'data/pretrain-layer/{}-{}.pkl.gz'.format(
-        settings.pretrain_fname(layer_num), epoch
+        settings.pretrain_fname(layer_num), str(epoch).zfill(5)
     )
     with gzip.open(fname, 'wb') as ifile:
         pickle.dump((dbn, settings), ifile, -1)
@@ -26,7 +26,7 @@ def save_pretrain_layer(dbn, layer_num, settings, epoch):
 
 def save_finetuning(dbn, settings, klass_num, epoch):
     fname = 'data/finetuning/{}-{}-{}.pkl.gz'.format(
-        settings.finetuning_fname(), klass_num, epoch
+        settings.finetuning_fname(), klass_num, str(epoch).zfill(5)
     )
     with gzip.open(fname, 'wb') as ifile:
         pickle.dump((dbn, settings), ifile, -1)
@@ -57,7 +57,7 @@ def load_pretrain_layer(layer_num, settings):
 
         fname = '{}-{}.pkl.gz'.format(
             settings.pretrain_fname(layer_num),
-            epoch
+            str(epoch).zfill(5)
         )
         if settings.pretrain_fname(layer_num) in f:
             fname = '{}/{}'.format(pth, fname)
@@ -95,7 +95,7 @@ def load_finetuning(settings, klass_num):
         fname = '{}-{}-{}.pkl.gz'.format(
             settings.finetuning_fname(),
             klass_num,
-            epoch
+            str(epoch).zfill(5)
         )
         if settings.finetuning_fname() in f:
             fname = '{}/{}'.format(pth, fname)

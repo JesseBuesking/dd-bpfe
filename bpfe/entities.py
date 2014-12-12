@@ -45,11 +45,12 @@ class Label(object):
             val += '  {:>25}: "{}"\n'.format(key, getattr(self, key))
         return val
 
-    def to_vec(self, klass_num=None):
+    def to_vec(self, klass_num):
         ret = None
 
-        for idx, (key, val) in enumerate(FLAT_LABELS):
-            if klass_num is not None and KLASS_LABEL_INFO[key][0] != klass_num:
+        idx = 0
+        for key, val in FLAT_LABELS:
+            if KLASS_LABEL_INFO[key][0] != klass_num:
                 continue
             if ret is None:
                 ret = [0] * KLASS_LABEL_INFO[key][1]
@@ -58,6 +59,8 @@ class Label(object):
             value = getattr(self, attr)
             if value == val:
                 ret[idx] = 1
+                break
+            idx += 1
 
         return ret
 

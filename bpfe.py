@@ -243,13 +243,13 @@ def test_DBN():
     settings.version = 3.0
     settings.k = 1
     settings.hidden_layers = [
-        HiddenLayerSettings(500, 2, 0.01),
-        HiddenLayerSettings(500, 1, 0.01),
-        HiddenLayerSettings(500, 1, 0.01)
+        HiddenLayerSettings(500, 50, 0.01),
+        HiddenLayerSettings(500, 50, 0.01),
+        HiddenLayerSettings(500, 50, 0.01)
     ]
     settings.batch_size = 5
-    settings.finetuning = FinetuningSettings(2, 0.1)
-    settings.chunks = ChunkSettings(3, 1, 1)
+    settings.finetuning = FinetuningSettings(100, 0.1)
+    settings.chunks = ChunkSettings(9, 4, 4, 11)
 
     train_len = 0
     for data, _ in save.train(settings):
@@ -415,6 +415,9 @@ def _run_with_params(settings):
             dbn, settings, resume_epoch = cache_pretrain
             if resume_epoch >= settings.hidden_layers[layer_idx].epochs - 1:
                 continue
+            print('resuming layer {} at epoch {} ...'.format(
+                layer_idx, resume_epoch + 1
+            ))
 
         print('getting the pre-training function for layer {} ...'.format(
             layer_idx
@@ -481,23 +484,24 @@ def _run_with_params(settings):
 def finetune(dbn, datasets, settings):
 
     # TODO since we're running a single class....
-    # with open('data/current-dbn.pkl', 'wb') as ifile:
-    #     pickle.dump(dbn, ifile)
+    with open('data/current-dbn.pkl', 'wb') as ifile:
+        pickle.dump(dbn, ifile)
+
     for klass, (klass_num, count) in KLASS_LABEL_INFO.items():
-        if klass != 'Function':
+        if klass in {'Function', 'Use'}:
             continue
 
         dbn.number_of_outputs = count
-        finetune_class(dbn, datasets, settings, klass, klass_num)
+        finetune_class(dbn, datasets, settings, klass, klass_num, count)
 
         try_predict_test(datasets, settings, klass, klass_num)
 
         # TODO since we're running a single class....
-        # with open('data/current-dbn.pkl', 'rb') as ifile:
-        #     dbn = pickle.load(ifile)
+        with open('data/current-dbn.pkl', 'rb') as ifile:
+            dbn = pickle.load(ifile)
 
 
-def finetune_class(dbn, datasets, settings, klass, klass_num):
+def finetune_class(dbn, datasets, settings, klass, klass_num, count):
     (train_set_x, train_set_y) = datasets[0]
     (valid_set_x, valid_set_y) = datasets[1]
     (test_set_x, test_set_y) = datasets[2]
@@ -531,7 +535,11 @@ def finetune_class(dbn, datasets, settings, klass, klass_num):
         print('... finetuning for "{}" is already complete'.format(klass))
         return
 
-    print('... finetuning the model, starting at epoch {}'.format(epoch))
+    print('... finetuning for "{}" ({} classes), starting at epoch {}'.format(
+        klass,
+        count,
+        epoch + 1
+    ))
 
     start_time = time.clock()
     done_looping = False
@@ -541,7 +549,10 @@ def finetune_class(dbn, datasets, settings, klass, klass_num):
         idx = 0
         start_epoch = time.clock()
         while idx < settings.train_batches:
-            print('n_train_batches idx: {}'.format(idx))
+            print('idx: {} < train_batches: {}'.format(
+                idx,
+                settings.train_batches
+            ))
 
             for row_len in vectorize(
                 save.train,
@@ -551,6 +562,12 @@ def finetune_class(dbn, datasets, settings, klass, klass_num):
                 klass_num
             ):
                 sub_train_batches = row_len / settings.batch_size
+                # print('{} {} {}'.format(
+                #     sub_train_batches,
+                #     row_len,
+                #     settings.batch_size
+                # ))
+                # print(settings.validation_frequency)
 
                 for minibatch_index in xrange(sub_train_batches):
                     train_fn(minibatch_index)
@@ -579,8 +596,11 @@ def finetune_class(dbn, datasets, settings, klass, klass_num):
                         # improve patience if loss improvement is
                         # good enough
                         if val_loss < settings.finetuning.minimum_improvement:
-                            settings.patience = \
+                            # print('updating patience', itr,
+                            #       settings.finetuning.patience_increase)
+                            settings.finetuning.patience = \
                                 itr * settings.finetuning.patience_increase
+                            # print('patience', settings.finetuning.patience)
 
                         # save best validation score and iteration
                         # number
@@ -628,6 +648,7 @@ def finetune_class(dbn, datasets, settings, klass, klass_num):
                             ))
 
                 if settings.finetuning.patience <= itr:
+                    print('done', settings.finetuning.patience, itr)
                     done_looping = True
                     break
 
