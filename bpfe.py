@@ -496,7 +496,7 @@ def finetune(dbn, datasets, settings):
         pickle.dump(dbn, ifile)
 
     for klass, (klass_num, count) in KLASS_LABEL_INFO.items():
-        if klass in {'Function', 'Use'}:
+        if klass in {'Function', 'Use', 'Reporting'}:
             continue
 
         dbn.number_of_outputs = count
@@ -549,6 +549,9 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count):
         epoch + 1
     ))
 
+    settings.finetuning[klass_num].patience = \
+        4. * (settings.train_size / settings.batch_size)
+
     start_time = time.clock()
     done_looping = False
     itr = epoch
@@ -599,21 +602,26 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count):
                     ))
 
                     # if we got the best validation score until now
-                    if val_loss < settings.finetuning.best_validation_loss:
+                    if val_loss < settings.finetuning[klass_num]\
+                        .best_validation_loss:
 
                         # improve patience if loss improvement is
                         # good enough
-                        if val_loss < settings.finetuning.minimum_improvement:
+                        if val_loss < settings.finetuning[klass_num]\
+                            .minimum_improvement:
                             # print('updating patience', itr,
-                            #       settings.finetuning.patience_increase)
-                            settings.finetuning.patience = \
-                                itr * settings.finetuning.patience_increase
-                            # print('patience', settings.finetuning.patience)
+                            #       settings.finetuning[klass_num]
+                            # .patience_increase)
+                            settings.finetuning[klass_num].patience = itr * \
+                                settings.finetuning[klass_num].patience_increase
+                            # print('patience', settings.finetuning[klass_num]
+                            # .patience)
 
                         # save best validation score and iteration
                         # number
-                        settings.finetuning.best_validation_loss = val_loss
-                        settings.finetuning.best_iteration = itr
+                        settings.finetuning[klass_num].best_validation_loss = \
+                            val_loss
+                        settings.finetuning[klass_num].best_iteration = itr
 
                         cache.save_finetuning(dbn, settings, klass_num, epoch)
 
@@ -627,12 +635,16 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count):
                         ))
                         test_loss = numpy.mean(test_losses)
 
-                        if test_loss < settings.finetuning.best_test_loss:
+                        if test_loss < settings.finetuning[klass_num]\
+                            .best_test_loss:
                             print('... saving current best model for {}'.format(
                                 klass
                             ))
                             cache.save_best_finetuning(dbn, settings, klass_num)
-                            settings.finetuning.best_test_loss = test_loss
+                            settings.finetuning[klass_num].best_test_loss = \
+                                test_loss
+                            settings.finetuning[klass_num].patience = itr * \
+                                settings.finetuning[klass_num].patience_increase
 
                         if False:
                             train_losses = train_model(vectorize(
@@ -655,8 +667,8 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count):
                                 test_loss * 100.
                             ))
 
-                if settings.finetuning.patience <= itr:
-                    print('done', settings.finetuning.patience, itr)
+                if settings.finetuning[klass_num].patience <= itr:
+                    print('done', settings.finetuning[klass_num].patience, itr)
                     done_looping = True
                     break
 
@@ -666,9 +678,9 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count):
 
     print('optimization complete. validation {}% @ iter {}, '
           'with test performance {}% for class {}'.format(
-              settings.finetuning.best_validation_loss * 100.,
-              settings.finetuning.best_iteration,
-              settings.finetuning.best_test_loss * 100.,
+              settings.finetuning[klass_num].best_validation_loss * 100.,
+              settings.finetuning[klass_num].best_iteration,
+              settings.finetuning[klass_num].best_test_loss * 100.,
               klass
           ))
 

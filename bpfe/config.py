@@ -234,33 +234,7 @@ class HiddenLayerSettings(object):
         )
 
 
-class FinetuningSettings(object):
-
-    def __init__(self, epochs, learning_rate):
-        self.epochs = epochs
-        self.learning_rate = learning_rate
-        self.best_validation_loss = numpy.inf
-        self.best_test_loss = numpy.inf
-        self.best_iteration = 0
-        self._patience = None
-
-    @property
-    def epochs(self):
-        return self._epochs
-
-    @epochs.setter
-    def epochs(self, value):
-        assert isinstance(value, int)
-        self._epochs = value
-
-    @property
-    def learning_rate(self):
-        return self._learning_rate
-
-    @learning_rate.setter
-    def learning_rate(self, value):
-        assert isinstance(value, float)
-        self._learning_rate = value
+class ClassSettings(object):
 
     @property
     def best_validation_loss(self):
@@ -313,6 +287,32 @@ class FinetuningSettings(object):
     def minimum_improvement(self):
         return self.best_validation_loss * self.improvement_threshold
 
+
+class FinetuningSettings(object):
+
+    def __init__(self, epochs, learning_rate):
+        self.epochs = epochs
+        self.learning_rate = learning_rate
+        self._klass_info = dict()
+
+    @property
+    def epochs(self):
+        return self._epochs
+
+    @epochs.setter
+    def epochs(self, value):
+        assert isinstance(value, int)
+        self._epochs = value
+
+    @property
+    def learning_rate(self):
+        return self._learning_rate
+
+    @learning_rate.setter
+    def learning_rate(self, value):
+        assert isinstance(value, float)
+        self._learning_rate = value
+
     def filename(self):
         return '{}'.format(
             self.learning_rate
@@ -328,6 +328,17 @@ class FinetuningSettings(object):
         return \
             self.epochs == other.epochs and \
             self.learning_rate == other.learning_rate
+
+    def __getitem__(self, item):
+        if item not in self._klass_info:
+            cs = ClassSettings()
+            cs._best_iteration = 0
+            cs._best_test_loss = numpy.inf
+            cs._best_validation_loss = numpy.inf
+            cs._patience = None
+            self._klass_info[item] = cs
+
+        return self._klass_info[item]
 
 
 class ChunkSettings(object):
@@ -438,7 +449,8 @@ class Settings(object):
         assert isinstance(value, int)
         self._train_size = value
         if isinstance(self.batch_size, int):
-            self.finetuning.patience = 4. * (self.train_size / self.batch_size)
+            for value in self.finetuning._klass_info.values():
+                value.patience = 4. * (self.train_size / self.batch_size)
 
     @property
     def num_cols(self):
@@ -458,7 +470,8 @@ class Settings(object):
         assert isinstance(value, int)
         self._batch_size = value
         if isinstance(self.train_size, int):
-            self.finetuning.patience = 4 * (self.train_size / self.batch_size)
+            for value in self.finetuning._klass_info.values():
+                value.patience = 4. * (self.train_size / self.batch_size)
 
     @property
     def hidden_layers(self):
