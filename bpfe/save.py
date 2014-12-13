@@ -152,8 +152,8 @@ def _save_vectors(name, settings):
     else:
         raise Exception('unexpected name {}'.format(name))
 
-    fname = 'data/{}-vec-{}-{}.pkl.gz'.format(
-        name, batch_size, settings.chunks
+    fname = 'data/{}-{}-vec-{}-{}.pkl.gz'.format(
+        settings.version, name, batch_size, settings.chunks
     )
     with gzip.open(fname, 'wb') as ifile:
         for data, labels in vectorize(loader, settings, batch_size):
@@ -169,8 +169,8 @@ def _save_vectors(name, settings):
 
 def _load_vectors(name, settings):
     batch_size = 5000
-    fname = 'data/{}-vec-{}-{}.pkl.gz'.format(
-        name, batch_size, settings.chunks
+    fname = 'data/{}-{}-vec-{}-{}.pkl.gz'.format(
+        settings.version, name, batch_size, settings.chunks
     )
     if not os.path.exists(fname):
         _save_vectors(name, settings)

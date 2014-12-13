@@ -114,7 +114,7 @@ def gen_test(settings, batch_size=None):
 
 def gen_train(settings, batch_size=None):
     for data in _gen_name('train', settings.chunks.train, batch_size):
-            yield data
+        yield data
 
 
 def gen_submission(settings, batch_size=None):

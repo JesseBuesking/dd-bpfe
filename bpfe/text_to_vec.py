@@ -16,12 +16,12 @@ class BinaryVectorizer(object):
         self.labels = []
         self.max_idx = 0
 
-    def normalizer(self, x):
+    def normalize(self, x):
         return [x]
 
     def fit(self, data):
         for row in data:
-            for n in self.normalizer(row):
+            for n in self.normalize(row):
                 if n not in self.value_indices:
                     self.value_indices[n] = self.max_idx
                     self.labels.append(n)
@@ -29,7 +29,7 @@ class BinaryVectorizer(object):
 
     def transform(self, value):
         ret = np.zeros((1, self.max_idx), dtype=np.int32)
-        for n in self.normalizer(value):
+        for n in self.normalize(value):
             idx = self.value_indices[n]
             ret[0, idx] = 1
         return ret

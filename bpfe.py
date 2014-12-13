@@ -13,6 +13,7 @@ from bpfe.config import FLAT_LABELS, KLASS_LABEL_INFO, Settings, \
     HiddenLayerSettings, FinetuningSettings, ChunkSettings, LABELS
 from bpfe.dl_dbn.DBN import DBN
 import numpy
+from bpfe.features import all_text_rows
 import bpfe.load as load
 from bpfe.models.perceptron_model import PerceptronModel
 import numpy as np
@@ -152,6 +153,7 @@ def run():
     # fund_description.info()
     # object_description.info()
     # text_1.info()
+    all_text_rows.info()
 
     # text_2.info()
     # text_3.info()
@@ -159,7 +161,7 @@ def run():
     # fte.info()
     # total.info()
 
-    load.store_raw()
+    # load.store_raw()
 
     # for key, value in v.iteritems():
     #     vec = value[0]
@@ -267,7 +269,7 @@ def test_DBN():
     # hidden_layer_depth_opts = [3, 4]
 
     settings = Settings()
-    settings.version = 3.0
+    settings.version = 4.0
     settings.k = 1
     settings.hidden_layers = [
         HiddenLayerSettings(500, 50, 0.01),
@@ -898,5 +900,5 @@ if __name__ == '__main__':
     # predict()
     # predict_train()
     test_DBN()
-    # run()
+    run()
     # stats()
