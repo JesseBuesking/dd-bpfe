@@ -71,9 +71,9 @@ def load_pretrain_layer(layer_num, settings):
         dbn = data[0]
         dbn.hidden_layer_sizes = \
             [hl.num_nodes for hl in settings.hidden_layers]
-        settings.numpy_rng = data[1].numpy_rng
-        settings.theano_rng = data[1].theano_rng
-        settings.train_size = data[1].train_size
+        settings_bak = settings
+        settings = data[1]
+        settings.load_pretrain(settings_bak, layer_num)
         return dbn, settings, epoch
 
 
@@ -107,11 +107,9 @@ def load_finetuning(settings, klass_num):
     with gzip.open(fname, 'rb') as ifile:
         data = pickle.load(ifile)
         dbn = data[0]
-        dbn.hidden_layer_sizes = \
-            [hl.num_nodes for hl in settings.hidden_layers]
         settings_bak = settings
         settings = data[1]
-        settings.finetuning.epochs = settings_bak.finetuning.epochs
+        settings.load_finetuning(settings_bak)
         return dbn, settings, epoch
 
 

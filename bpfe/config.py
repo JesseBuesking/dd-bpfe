@@ -220,6 +220,9 @@ class HiddenLayerSettings(object):
         assert isinstance(value, float)
         self._learning_rate = value
 
+    def stats_info(self):
+        return [self.num_nodes, self.epochs, self.learning_rate]
+
     def filename(self):
         return '{}-{}'.format(
             self.num_nodes,
@@ -287,6 +290,9 @@ class ClassSettings(object):
     def minimum_improvement(self):
         return self.best_validation_loss * self.improvement_threshold
 
+    def stats_info(self):
+        return [self.best_validation_loss, self.best_test_loss]
+
 
 class FinetuningSettings(object):
 
@@ -318,6 +324,12 @@ class FinetuningSettings(object):
             self.learning_rate
         )
 
+    def stats_info(self):
+        ret = [self.epochs, self.learning_rate]
+        for klass_num, value in self._klass_info.items():
+            ret.append([klass_num, value.stats_info()])
+        return ret
+
     def __str__(self):
         return '{}-{}'.format(
             self.epochs,
@@ -339,6 +351,10 @@ class FinetuningSettings(object):
             self._klass_info[item] = cs
 
         return self._klass_info[item]
+
+    def __iter__(self):
+        for key, value in self._klass_info:
+            yield key, value
 
 
 class ChunkSettings(object):
@@ -410,6 +426,34 @@ class Settings(object):
         self._patience = None
         self._train_size = None
         self._batch_size = None
+        self._hidden_layers = None
+
+    def load_finetuning(self, settings):
+        self.finetuning.epochs = settings.finetuning.epochs
+        self.finetuning.learning_rate = settings.finetuning.learning_rate
+        for key, value in settings.finetuning:
+            svalue = settings.finetuning[key]
+            value.best_validation_loss = svalue.best_validation_loss
+            value.best_test_loss = svalue.best_test_loss
+            value.best_iteration_loss = svalue.best_iteration_loss
+            value.best_patience_loss = svalue.best_patience_loss
+
+    def load_pretrain(self, settings, layer_num):
+        for idx, shl in enumerate(settings.hidden_layers):
+            if idx < layer_num:
+                # overwrite only layers >= layer_num
+                continue
+
+            if (len(self.hidden_layers) - 1) < idx:
+                self.hidden_layers.append(shl)
+
+            # actually update hl settings
+            hl = self.hidden_layers[idx]
+            hl.num_nodes = shl.num_nodes
+            hl.epochs = shl.epochs
+            hl.learning_rate = shl.learning_rate
+
+        self.load_finetuning(settings)
 
     @property
     def version(self):
@@ -560,6 +604,16 @@ class Settings(object):
             self.version,
             self.finetune_string()
         )
+
+    def stats_info(self):
+        ret = [
+            self.version,
+            self.batch_size,
+            self.k,
+            self.finetuning.stats_info(),
+            [hl.stats_info() for hl in self.hidden_layers]
+        ]
+        return ret
 
     def __eq__(self, other):
         return \

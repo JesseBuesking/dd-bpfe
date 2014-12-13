@@ -61,6 +61,11 @@ class RBM(object):
         if theano_rng is None:
             theano_rng = RandomStreams(numpy_rng.randint(2 ** 30))
 
+        self.numpy_rng = numpy_rng
+        self.theano_rng = theano_rng
+        self.monitoring_cost = None
+        self.updates = None
+
         if W is None:
             # W is initialized with `initial_W` which is uniformely
             # sampled from -4*sqrt(6./(n_visible+n_hidden)) and
@@ -68,7 +73,7 @@ class RBM(object):
             # converted using asarray to dtype theano.config.floatX so
             # that the code is runable on GPU
             initial_W = numpy.asarray(
-                numpy_rng.uniform(
+                self.numpy_rng.uniform(
                     low=-4 * numpy.sqrt(6. / (n_hidden + n_visible)),
                     high=4 * numpy.sqrt(6. / (n_hidden + n_visible)),
                     size=(n_visible, n_hidden)
@@ -108,7 +113,6 @@ class RBM(object):
         self.W = W
         self.hbias = hbias
         self.vbias = vbias
-        self.theano_rng = theano_rng
         # **** WARNING: It is not a good idea to put things in this list
         # other than shared variables created in this function.
         self.params = [self.W, self.hbias, self.vbias]
@@ -273,7 +277,9 @@ class RBM(object):
             monitoring_cost = self.get_reconstruction_cost(updates,
                                                            pre_sigmoid_nvs[-1])
 
-        return monitoring_cost, updates
+        self.monitoring_cost = monitoring_cost
+        self.updates = updates
+        self.learning_rate = lr
         # end-snippet-4
 
     def get_pseudo_likelihood_cost(self, updates):

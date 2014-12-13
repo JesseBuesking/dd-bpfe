@@ -210,7 +210,7 @@ class DBN(object):
         self.errors = self.logLayer.errors(self.y)
 
     def pretraining_function(self, train_set_x, batch_size, k, layer_num,
-                             numpy_rng, theano_rng):
+                             numpy_rng, theano_rng, load=False):
         """Generates a list of functions, for performing one step of
         gradient descent at a given layer. The function will require
         as input the minibatch index, and to train an RBM you just
@@ -235,19 +235,21 @@ class DBN(object):
         # ending of a batch given `index`
         batch_end = batch_begin + batch_size
 
-        rbm = self.create_hidden_layer(layer_num, numpy_rng, theano_rng)
+        if load:
+            rbm = self.rbm_layers[layer_num]
+        else:
+            rbm = self.create_hidden_layer(layer_num, numpy_rng, theano_rng)
 
-        # get the cost and the updates list
-        # using CD-k here (persistent=None) for training each RBM.
-        # TODO: change cost function to reconstruction error
-        cost, updates = rbm.get_cost_updates(
-            learning_rate, persistent=None, k=k)
+            # get the cost and the updates list
+            # using CD-k here (persistent=None) for training each RBM.
+            # TODO: change cost function to reconstruction error
+            rbm.get_cost_updates(learning_rate, persistent=None, k=k)
 
         # compile the theano function
         fn = theano.function(
-            inputs=[index, theano.Param(learning_rate, default=0.1)],
-            outputs=cost,
-            updates=updates,
+            inputs=[index, rbm.learning_rate],
+            outputs=rbm.monitoring_cost,
+            updates=rbm.updates,
             givens={
                 self.x: train_set_x[batch_begin:batch_end]
             }

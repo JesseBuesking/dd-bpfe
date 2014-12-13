@@ -259,17 +259,67 @@ def stats():
     pm.print_scores()
 
 
-def test_DBN():
+def DBN_tuning():
     """ """
-    # k_opts = [5]
-    # batch_size_opts = [10]
-    # hidden_layer_size_opts = [500]
-    # pretrain_lr_opts = [0.01, 0.001]
-    # finetune_lr_opts = [0.1, 0.01]
-    # hidden_layer_depth_opts = [3, 4]
 
+    def try_these():
+        for ptlr in [0.01]:
+            for ftlr in [0.1]:
+                for hl_size in [1000]:
+                    for hl_len in [3, 4, 5]:
+                        yield ptlr, ftlr, hl_size, hl_len
+    # def try_these():
+    #     for ptlr in [0.1]:
+    #         for ftlr in [0.1]:
+    #             for hl_size in [100]:
+    #                 for hl_len in [2, 3]:
+    #                     yield ptlr, ftlr, hl_size, hl_len
+
+    epochs_per = 10
+    for ptlr, ftlr, hl_size, hl_len in try_these():
+        settings = Settings()
+        settings.version = 4.2
+        settings.k = 1
+        for i in range(hl_len):
+            if settings.hidden_layers is None:
+                settings.hidden_layers = [
+                    HiddenLayerSettings(
+                        hl_size,
+                        epochs_per*hl_len*int(math.log(1/ptlr, 10)),
+                        ptlr
+                    )
+                ]
+            else:
+                settings.hidden_layers.append(
+                    HiddenLayerSettings(
+                        hl_size,
+                        epochs_per*hl_len*int(math.log(1/ptlr, 10)),
+                        ptlr
+                    )
+                )
+        settings.batch_size = 10
+        settings.finetuning = FinetuningSettings(
+            epochs_per*hl_len*int(math.log(1/ftlr, 10)),
+            ftlr
+        )
+        settings.chunks = ChunkSettings(1, 1, 1, None)
+
+        start = time.clock()
+        _run_with_params(settings)
+        print('DURATION: {}'.format(time.clock() - start))
+
+    if not os.path.exists('data/stats/stats.pkl'):
+        return
+
+    with open('data/stats/stats.pkl', 'rb') as ifile:
+        stats = pickle.load(ifile)
+        for row in stats:
+            print(' '.join([str(i) for i in row]))
+
+
+def DBN_run():
     settings = Settings()
-    settings.version = 4.0
+    settings.version = 4.1
     settings.k = 1
     settings.hidden_layers = [
         HiddenLayerSettings(500, 50, 0.01),
@@ -278,7 +328,7 @@ def test_DBN():
     ]
     settings.batch_size = 5
     settings.finetuning = FinetuningSettings(100, 0.1)
-    settings.chunks = ChunkSettings(9, 4, 4, 11)
+    settings.chunks = ChunkSettings(3, 2, 2, None)
 
     train_len = 0
     for data, _ in save.train(settings):
@@ -301,49 +351,11 @@ def test_DBN():
     print('test size: {}'.format(test_len))
     print('submission size: {}'.format(submission_len))
 
-    # def print_sizes(gen, name):
-    #     total_size = 0
-    #     for i in gen():
-    #         total_size += len(i)
-    #     print('{} size: {}'.format(name, total_size))
-    #
-    # print_sizes(load.gen_train, 'train')
-    # print_sizes(load.gen_validate, 'validate')
-    # print_sizes(load.gen_test, 'test')
-    # print_sizes(load.gen_submission, 'submission')
-
-    # combos = []
-    # for ko in k_opts:
-    #     for bso in batch_size_opts:
-    #         for hlso in hidden_layer_size_opts:
-    #             for plo in pretrain_lr_opts:
-    #                 for flo in finetune_lr_opts:
-    #                     for hldo in hidden_layer_depth_opts:
-    #                         combos.append((ko, bso, hlso, hldo, flo, plo))
-    # for ko, bso, hlso, hldo, flo, plo in combos:
-    # hls = [hlso for _ in range(hldo)]
-
     start = time.clock()
     _run_with_params(settings)
     print('DURATION: {}'.format(time.clock() - start))
 
     create_submission_file(settings)
-
-    # settings_stats_fname = 'data/settings_stats.pkl'
-    # if os.path.exists(settings_stats_fname):
-    #     with open(settings_stats_fname, 'rb') as ifile:
-    #         settings_stats = pickle.load(ifile)
-    #         for klass, all_stats in settings_stats.items():
-    #             all_stats.sort(key=lambda x: x[3], reverse=True)
-    #
-    #             print('for {}:'.format(klass))
-    #             for ind, stats in enumerate(all_stats):
-    #                 settings_key = ', '.join([
-    #                     str(k) + ': ' + str(v) for k, v in stats[0].items()
-    #                 ])
-    #                 print('\t{}: {}, {} for [{}]'.format(
-    #                     ind, stats[3], stats[1], settings_key
-    #                 ))
 
 
 def _run_with_params(settings):
@@ -439,7 +451,8 @@ def _run_with_params(settings):
             settings.k,
             layer_idx,
             settings.numpy_rng,
-            settings.theano_rng
+            settings.theano_rng,
+            resume_epoch is not None
         )
 
         # go through pretraining epochs
@@ -452,11 +465,11 @@ def _run_with_params(settings):
             c = []
 
             for row_len in vectorize(
-                    save.full_train,
-                    train_set_x,
-                    train_set_y,
-                    settings,
-                    0
+                save.full_train,
+                train_set_x,
+                train_set_y,
+                settings,
+                0
             ):
                 # compute number of mini-batches for training, validation and
                 # testing
@@ -493,22 +506,22 @@ def _run_with_params(settings):
 
 
 def finetune(dbn, datasets, settings):
-    # TODO since we're running a single class....
-    with open('data/current-dbn.pkl', 'wb') as ifile:
-        pickle.dump(dbn, ifile)
+    # # TODO since we're running a single class....
+    # with open('data/current-dbn.pkl', 'wb') as ifile:
+    #     pickle.dump(dbn, ifile)
 
     for klass, (klass_num, count) in KLASS_LABEL_INFO.items():
-        if klass in {'Function', 'Use', 'Reporting'}:
+        if klass not in {'Function'}:
             continue
 
         dbn.number_of_outputs = count
         finetune_class(dbn, datasets, settings, klass, klass_num, count)
 
-        try_predict_test(datasets, settings, klass, klass_num)
+        # try_predict_test(datasets, settings, klass, klass_num)
 
-        # TODO since we're running a single class....
-        with open('data/current-dbn.pkl', 'rb') as ifile:
-            dbn = pickle.load(ifile)
+        # # TODO since we're running a single class....
+        # with open('data/current-dbn.pkl', 'rb') as ifile:
+        #     dbn = pickle.load(ifile)
 
 
 def finetune_class(dbn, datasets, settings, klass, klass_num, count):
@@ -603,6 +616,8 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count):
                         val_loss * 100.
                     ))
 
+                    cache.save_finetuning(dbn, settings, klass_num, epoch)
+
                     # if we got the best validation score until now
                     if val_loss < settings.finetuning[klass_num]\
                         .best_validation_loss:
@@ -625,8 +640,6 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count):
                             val_loss
                         settings.finetuning[klass_num].best_iteration = itr
 
-                        cache.save_finetuning(dbn, settings, klass_num, epoch)
-
                         # test it on the test set
                         test_losses = test_model(vectorize(
                             save.test,
@@ -642,7 +655,7 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count):
                             print('... saving current best model for {}'.format(
                                 klass
                             ))
-                            cache.save_best_finetuning(dbn, settings, klass_num)
+                            # cache.save_best_finetuning(dbn, settings, klass_num)
                             settings.finetuning[klass_num].best_test_loss = \
                                 test_loss
                             settings.finetuning[klass_num].patience = itr * \
@@ -690,6 +703,16 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count):
         os.path.split(__file__)[1],
         ((end_time - start_time) / 60.)
     ))
+
+    if os.path.exists('data/stats/stats.pkl'):
+        with open('data/stats/stats.pkl', 'rb') as ifile:
+            stats = pickle.load(ifile)
+    else:
+        stats = []
+
+    with open('data/stats/stats.pkl', 'wb') as ifile:
+        stats.append(settings.stats_info())
+        pickle.dump(stats, ifile)
 
 
 def try_predict_test(datasets, settings, klass, klass_num):
@@ -770,30 +793,6 @@ def try_predict_test(datasets, settings, klass, klass_num):
         total_predictions,
         (1 - matches / float(total_predictions)) * 100.0
     ))
-
-    # with open(final_fname, 'wb') as ifile:
-    #     pickle.dump(dbn, ifile)
-    # return final_fname
-
-    # stats = [
-    #     settings,
-    #     best_validation_loss,
-    #     best_iter,
-    #     test_score
-    # ]
-    #
-    # if klass not in settings_stats:
-    #     settings_stats[klass] = []
-    #
-    # for data in settings_stats[klass]:
-    #     data_settings_key = settings_name(data[0])
-    #     if data_settings_key == current_settings_key:
-    #         break
-    #
-    # settings_stats[klass].append(stats)
-    #
-    # with open(settings_stats_fname, 'wb') as ifile:
-    #     pickle.dump(settings_stats, ifile)
 
 
 def create_submission_file(settings):
@@ -899,6 +898,7 @@ def predict_submission(datasets, settings, klass, klass_num):
 if __name__ == '__main__':
     # predict()
     # predict_train()
-    test_DBN()
-    run()
+    DBN_tuning()
+    # DBN_run()
+    # run()
     # stats()
