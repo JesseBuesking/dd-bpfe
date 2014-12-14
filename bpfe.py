@@ -319,16 +319,16 @@ def DBN_tuning():
 
 def DBN_run():
     settings = Settings()
-    settings.version = 4.1
+    settings.version = 5.0
     settings.k = 1
     settings.hidden_layers = [
-        HiddenLayerSettings(500, 50, 0.01),
-        HiddenLayerSettings(500, 50, 0.01),
-        HiddenLayerSettings(500, 50, 0.01)
+        HiddenLayerSettings(1000, 50, 0.01),
+        HiddenLayerSettings(1000, 50, 0.01),
+        HiddenLayerSettings(1000, 50, 0.01)
     ]
     settings.batch_size = 5
     settings.finetuning = FinetuningSettings(100, 0.1)
-    settings.chunks = ChunkSettings(3, 2, 2, None)
+    settings.chunks = ChunkSettings(9, 4, 4, 11)
 
     train_len = 0
     for data, _ in save.train(settings):
@@ -488,8 +488,6 @@ def _run_with_params(settings):
 
             cache.save_pretrain_layer(dbn, layer_idx, settings, epoch)
 
-    # print('ts', settings.train_size)
-
     end_time = time.clock()
     # end-snippet-2
     sys.stderr.write(
@@ -506,9 +504,9 @@ def _run_with_params(settings):
 
 
 def finetune(dbn, datasets, settings):
-    # # TODO since we're running a single class....
-    # with open('data/current-dbn.pkl', 'wb') as ifile:
-    #     pickle.dump(dbn, ifile)
+    # TODO since we're running a single class....
+    with open('data/current-dbn.pkl', 'wb') as ifile:
+        pickle.dump(dbn, ifile)
 
     for klass, (klass_num, count) in KLASS_LABEL_INFO.items():
         if klass not in {'Function'}:
@@ -519,9 +517,9 @@ def finetune(dbn, datasets, settings):
 
         # try_predict_test(datasets, settings, klass, klass_num)
 
-        # # TODO since we're running a single class....
-        # with open('data/current-dbn.pkl', 'rb') as ifile:
-        #     dbn = pickle.load(ifile)
+        # TODO since we're running a single class....
+        with open('data/current-dbn.pkl', 'rb') as ifile:
+            dbn = pickle.load(ifile)
 
 
 def finetune_class(dbn, datasets, settings, klass, klass_num, count):
@@ -531,7 +529,6 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count):
 
     epoch = 0
     val = cache.load_finetuning(settings, klass_num)
-    # val = None
     if val is not None:
         dbn, settings, epoch = val
         train_fn, train_model, validate_model, test_model, \
@@ -620,12 +617,12 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count):
 
                     # if we got the best validation score until now
                     if val_loss < settings.finetuning[klass_num]\
-                        .best_validation_loss:
+                       .best_validation_loss:
 
                         # improve patience if loss improvement is
                         # good enough
                         if val_loss < settings.finetuning[klass_num]\
-                            .minimum_improvement:
+                           .minimum_improvement:
                             # print('updating patience', itr,
                             #       settings.finetuning[klass_num]
                             # .patience_increase)
@@ -651,11 +648,11 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count):
                         test_loss = numpy.mean(test_losses)
 
                         if test_loss < settings.finetuning[klass_num]\
-                            .best_test_loss:
+                           .best_test_loss:
                             print('... saving current best model for {}'.format(
                                 klass
                             ))
-                            # cache.save_best_finetuning(dbn, settings, klass_num)
+                            cache.save_best_finetuning(dbn, settings, klass_num)
                             settings.finetuning[klass_num].best_test_loss = \
                                 test_loss
                             settings.finetuning[klass_num].patience = itr * \
@@ -704,15 +701,15 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count):
         ((end_time - start_time) / 60.)
     ))
 
-    if os.path.exists('data/stats/stats.pkl'):
-        with open('data/stats/stats.pkl', 'rb') as ifile:
-            stats = pickle.load(ifile)
-    else:
-        stats = []
-
-    with open('data/stats/stats.pkl', 'wb') as ifile:
-        stats.append(settings.stats_info())
-        pickle.dump(stats, ifile)
+    # if os.path.exists('data/stats/stats.pkl'):
+    #     with open('data/stats/stats.pkl', 'rb') as ifile:
+    #         stats = pickle.load(ifile)
+    # else:
+    #     stats = []
+    #
+    # with open('data/stats/stats.pkl', 'wb') as ifile:
+    #     stats.append(settings.stats_info())
+    #     pickle.dump(stats, ifile)
 
 
 def try_predict_test(datasets, settings, klass, klass_num):
@@ -898,7 +895,7 @@ def predict_submission(datasets, settings, klass, klass_num):
 if __name__ == '__main__':
     # predict()
     # predict_train()
-    DBN_tuning()
-    # DBN_run()
+    # DBN_tuning()
+    DBN_run()
     # run()
     # stats()
