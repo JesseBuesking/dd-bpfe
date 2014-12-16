@@ -355,7 +355,7 @@ def DBN_run():
     _run_with_params(settings)
     print('DURATION: {}'.format(time.clock() - start))
 
-    create_submission_file(settings)
+    # create_submission_file(settings)
 
 
 def _run_with_params(settings):
@@ -509,13 +509,13 @@ def finetune(dbn, datasets, settings):
         pickle.dump(dbn, ifile)
 
     for klass, (klass_num, count) in KLASS_LABEL_INFO.items():
-        if klass not in {'Function'}:
-            continue
+        # if klass in {'Function'}:
+        #     continue
 
         dbn.number_of_outputs = count
-        finetune_class(dbn, datasets, settings, klass, klass_num, count)
+        # finetune_class(dbn, datasets, settings, klass, klass_num, count)
 
-        # try_predict_test(datasets, settings, klass, klass_num)
+        try_predict_test(datasets, settings, klass, klass_num)
 
         # TODO since we're running a single class....
         with open('data/current-dbn.pkl', 'rb') as ifile:
