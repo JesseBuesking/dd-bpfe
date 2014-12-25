@@ -12,75 +12,92 @@
 #
 # total entries: 400277
 # unique entries: 173
+from collections import Counter
+from os.path import dirname
 from pprint import pprint
+import re
 import sys
+import time
 from bpfe.config import Settings, ChunkSettings
+from bpfe.entities import Data
 
 import bpfe.load as load
 from bpfe.text_to_vec import TextVectorizer
+from bpfe.text_transform import transform
+from bpfe.util import sentence_splitter
 
 
 def info():
     s = Settings()
     cs = ChunkSettings(sys.maxint, sys.maxint, sys.maxint, sys.maxint)
     s.chunks = cs
-    train = reduce(
-        lambda agg, x: agg + x, [i for i in load.gen_train(s)], [])
-    validate = reduce(
-        lambda agg, x: agg + x, [i for i in load.gen_validate(s)], [])
-    test = reduce(
-        lambda agg, x: agg + x, [i for i in load.gen_test(s)], [])
+    # train = reduce(
+    #     lambda agg, x: agg + x, [i for i in load.gen_train(s)], [])
+    # validate = reduce(
+    #     lambda agg, x: agg + x, [i for i in load.gen_validate(s)], [])
+    # test = reduce(
+    #     lambda agg, x: agg + x, [i for i in load.gen_test(s)], [])
     submission = reduce(
         lambda agg, x: agg + x, [i for i in load.gen_submission(s)], [])
-    _info(train + validate + test + submission)
+    # _info(train + validate + test + submission)
+    _info(submission)
 
 
 def _info(rows):
-    d = dict()
-    text_attributes = [
-        'object_description', 'program_description',
-        'subfund_description', 'job_title_description',
-        'facility_or_department', 'sub_object_description',
-        'location_description', 'function_description', 'position_extra',
-        'text_4', 'text_2', 'text_3', 'fund_description', 'text_1'
-    ]
 
-    example_info = dict()
-
-    for data, label in rows:
-        for attr in text_attributes:
-            value = getattr(data, attr)
-            val = d.setdefault(value, 0)
-            d[value] = val + 1
-
-            if value not in example_info:
-                example_info[value] = []
-            example_info[value].append((attr, value))
-
-    tv = TextVectorizer()
-    tv.fit(d.keys())
-    top_n = sorted(
-        [(word, count) for word, count in tv.value_indices.items()],
-        key=lambda (w, c): c,
-        reverse=True
+    seen = set()
+    c = Counter()
+    sentences = dict()
+    start = time.clock()
+    replacements = 0
+    fname = '{}\data\cleanup.txt'.format(
+        dirname(dirname(dirname(__file__)))
     )
+    with open(fname, 'w') as ifile:
+        ifile.write('total rows: {}\n'.format(len(rows)))
+        for idx, (data, label) in enumerate(rows):
+            for attr in Data.text_attributes:
+                value = getattr(data, attr)
 
-    print('total words: {}'.format(len(top_n)))
-    print(top_n[:10])
+                if value == '':
+                    continue
 
-    ordered = sorted([i[0] for i in top_n])
-    for word in ordered:
-        print('{}:'.format(word))
+                # for word in re.split('\s*-+\s*|\s+', value):
+                #     if word not in words:
+                #         words[word] = []
+                #     words[word].append((attr, value))
+                #     c[word] += 1
+                original, value = transform(value)
+                if value not in seen and original != value:
+                    replacements += 1
+                    seen.add(value)
+                    ifile.write(
+                        'idx: {} "{}" | "{}"\n'.format(idx, original, value)
+                    )
 
-        idx = 0
-        for sentence, infos in example_info.items():
-            if ' ' + word + ' ' in sentence or \
-               (' ' + word in sentence and sentence.endswith(word)) or \
-               (word + ' ' in sentence and sentence.startswith(word)):
-                print('  {}'.format(infos[:2]))
-                idx += 1
-                if idx >= 3:
-                    break
+                for word in sentence_splitter(value):
+                    if word not in sentences:
+                        sentences[word] = []
+
+                    if len(sentences[word]) < 25:
+                        if not any([i[1] == value for i in sentences[word]]):
+                            sentences[word].append((attr, value))
+
+                    if word != '':
+                        c[word] += 1
+        ifile.write('elapsed: {}\n'.format(time.clock() - start))
+        ifile.write('replacements: {}\n'.format(replacements))
+
+        ifile.write('total words: {}\n'.format(len(c)))
+        ifile.write(str(c.most_common(10)) + '\n')
+
+        # ordered = sorted(list(c))
+        for w, count in c.most_common(sys.maxint):
+            ifile.write('{} ({}):\n'.format(w, count))
+
+            for attr, s in sentences[w]:
+                ifile.write('  {}\n'.format((attr, s)))
+
 
     # tups = [(i, v) for i, v in d.iteritems()]
     # tups.sort(key=lambda x: (x[1], x[0]), reverse=True)

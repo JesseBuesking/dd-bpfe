@@ -5,12 +5,12 @@ efficiency.
 
 
 from collections import defaultdict
-import sys
-from bpfe.config import LABEL_MAPPING
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler
 
 
-MAXVAL = sys.maxint
-MINVAL = -MAXVAL
+eps = 1e-15
+mms = MinMaxScaler((eps, 1-eps))
 
 
 class AveragedPerceptron(object):
@@ -19,7 +19,8 @@ class AveragedPerceptron(object):
     def __init__(self):
         # Each feature gets its own weight vector, so weights is a dict-of-dicts
         self.weights = {}
-        self.classes = dict()
+        self.classes = list()
+        self.learning_rate = 0.1
         # The accumulated values, for the averaging. These will be keyed by
         # feature/class tuples
         self._totals = defaultdict(int)
@@ -34,32 +35,14 @@ class AveragedPerceptron(object):
         """
         Dot-product the features and current weights and return the best label.
         """
-        scores = defaultdict(float)
-        for feat, value in features.items():
-            if value == 0:
-                continue
-
-            weights = self.weights.get(feat)
-            if weights is None:
-                continue
-
-            for label, weight in weights.items():
-                scores[label] += value * weight
-
-        # Do a secondary alphabetic sort, for stability
-        ret = dict()
-        for key in LABEL_MAPPING.keys():
-            ret[key] = max(
-                self.classes[key],
-                key=lambda x: (scores[x], x)
-            )
-        return ret
+        scores = self.predict_proba(features)
+        return self.classes[np.argmax(scores)]
 
     def predict_proba(self, features):
         """
         Dot-product the features and current weights and return the best label.
         """
-        scores = defaultdict(float)
+        scores = np.zeros(len(self.classes))
         for feat, value in features.items():
             if value == 0:
                 continue
@@ -68,62 +51,33 @@ class AveragedPerceptron(object):
             if weights is None:
                 continue
 
-            for label, weight in weights.items():
-                scores[label] += value * weight
+            scores += (value * weights)
 
-        # Do a secondary alphabetic sort, for stability
-        ret = dict()
-        for key in LABEL_MAPPING.keys():
-            small_scores = []
-            mini = MAXVAL
-            maxi = MINVAL
-            for x in self.classes[key]:
-                score = scores[x]
-                maxi = max(maxi, score)
-                mini = min(mini, score)
-                small_scores.append([x, score])
+        # scores = (scores - scores.mean()) / scores.std()
+        # scores[np.isnan(scores)] = eps
+        scores = mms.fit_transform(scores)
 
-            if maxi != mini:
-                divisor = maxi - mini
-            else:
-                divisor = 1
-
-            for l in small_scores:
-                l[1] = (l[1] - mini) / divisor
-                ret[(key, l[0])] = l[1]
-
-        return ret
+        return scores
 
     def update(self, truth, guess, features):
-        """ Update the feature weights. """
-        def upd_feat(c, f, w, v):
-            param = (f, c)
-            self._totals[param] += (self.i - self._tstamps[param]) * w
-            self._tstamps[param] = self.i
-            self.weights[f][c] = w + v
+        def upd_feat(f, w, v):
+            self._totals[f] += (self.i - self._tstamps[f]) * w
+            self._tstamps[f] = self.i
+            self.weights[f] = w + v
+
+        diff = np.array(truth) - np.array(guess)
+        diff *= self.learning_rate
 
         self.i += 1
-        for real_key, key in LABEL_MAPPING.iteritems():
-            t = getattr(truth, key)
-            g = guess.get(real_key)
-            if t == g:
-                continue
-            for f in features.keys():
-                weights = self.weights.setdefault(f, {})
-                upd_feat(t, f, weights.get(t, 0.0), 1.0)
-                upd_feat(g, f, weights.get(g, 0.0), -1.0)
-        return None
+        for f in features.keys():
+            weights = self.weights.setdefault(f, np.zeros(len(self.classes)))
+            upd_feat(f, weights, diff)
 
     def average_weights(self):
         """ Average weights from all iterations. """
-        for feat, weights in self.weights.items():
-            new_feat_weights = {}
-            for klass, weight in weights.items():
-                param = (feat, klass)
-                total = self._totals[param]
-                total += (self.i - self._tstamps[param]) * weight
-                averaged = round(total / float(self.i), 3)
-                if averaged:
-                    new_feat_weights[klass] = averaged
-            self.weights[feat] = new_feat_weights
+        for feat, weight in self.weights.items():
+            total = self._totals[feat]
+            total += (self.i - self._tstamps[feat]) * weight
+            averaged = total / float(self.i)
+            self.weights[feat] = averaged
         return None

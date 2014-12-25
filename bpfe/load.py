@@ -5,13 +5,16 @@ import os
 import random
 import sys
 from bpfe.clean import clean_value
-from bpfe.config import INPUT_MAPPING, LABEL_MAPPING
+from bpfe.config import INPUT_MAPPING, LABEL_MAPPING, Settings, ChunkSettings
 from bpfe.entities import Data, Label
 from bpfe.feature_engineering import get_vectorizers
 from bpfe.reservoir import reservoir
 import math
 
 # noinspection PyBroadException
+from bpfe.text_transform import transform
+
+
 try:
     import cPickle as pickle
 except:
@@ -66,11 +69,10 @@ def generate_rows(file_path, seed, amt):
 
 
 def split_test_train(data):
-    batch_size = 20000
-    validate_data = data[:batch_size]
-    data = data[batch_size:]
-    test_data = data[:batch_size]
-    train_data = data[batch_size:]
+    validate_data = data[:40000]
+    data = data[40000:]
+    test_data = data[:50000]
+    train_data = data[50000:]
     return validate_data, test_data, train_data
 
 
@@ -88,7 +90,15 @@ def store_raw(seed=1, verbose=False):
         ))
 
     def store_in_chunks(data, name):
-        with open('data/raw-{}.pkl'.format(name), 'wb') as datafile:
+        # add changes to data here, then regen
+        for row, label in data:
+            for attr in Data.text_attributes:
+                value = getattr(row, attr)
+
+                _, cleaned = transform(value)
+                row.cleaned[attr + '-mapped'] = cleaned
+
+        with open('data/data-{}.pkl'.format(name), 'wb') as datafile:
             chunks = len(data) / float(chunk_size)
             chunks = int(math.ceil(chunks))
             pickle.dump(chunks, datafile, -1)
@@ -113,7 +123,7 @@ def gen_test(settings, batch_size=None):
 
 
 def gen_train(settings, batch_size=None):
-    for data in _gen_name('train', settings.chunks.train, batch_size):
+    for data in _gen_name('train', settings.chunks._train, batch_size):
         yield data
 
 
@@ -126,7 +136,7 @@ def _gen_name(name, num_chunks, batch_size=None):
     if batch_size is None:
         batch_size = sys.maxint
 
-    with open('data/raw-{}.pkl'.format(name), 'rb') as datafile:
+    with open('data/data-{}.pkl'.format(name), 'rb') as datafile:
         chunks = pickle.load(datafile)
         data = []
         for i in range(chunks):
@@ -151,6 +161,33 @@ def _gen_name(name, num_chunks, batch_size=None):
 
         if len(data) > 0:
             yield data
+
+
+def ugen_validate():
+    for data in _ugen_name('validate'):
+        yield data
+
+
+def ugen_test():
+    for data in _ugen_name('test'):
+        yield data
+
+
+def ugen_train():
+    for data in _ugen_name('train'):
+        yield data
+
+
+def ugen_submission():
+    for data in _ugen_name('submission'):
+        yield data
+
+
+def _ugen_name(name):
+    with open('data/unique-{}.pkl'.format(name), 'rb') as datafile:
+        data = pickle.load(datafile)
+        for row in data:
+            yield row
 
 
 def load_vectorizers(settings):

@@ -4,14 +4,26 @@
 from __future__ import absolute_import
 from datetime import datetime
 import locale
+import re
+from sklearn.metrics import log_loss
+import sys
+from bpfe.entities import Data
+from bpfe.feature_engineering import all_ngrams
+
+
 locale.setlocale(locale.LC_ALL, 'US')
 import random
 from collections import defaultdict
 import pickle
 import time
+import numpy as np
 from bpfe import scoring
-from bpfe.config import LABELS, LABEL_MAPPING, FLAT_LABELS, INPUT_CODES
+from bpfe.config import LABEL_MAPPING, FLAT_LABELS, INPUT_CODES
 from bpfe.models._perceptron import AveragedPerceptron
+from nltk.stem import SnowballStemmer
+
+
+sbs = SnowballStemmer('english')
 
 
 class PerceptronModel(object):
@@ -52,53 +64,98 @@ class PerceptronModel(object):
         self.seed = seed
         self.iterations = nr_iter
         self.start = datetime.utcnow()
+        self.classes = set()
         random.seed(seed)
-        for key, values in LABELS.iteritems():
-            self.classes[key] = set()
-            for value in values:
-                self.classes[key].add(value)
+        for _, label in training_data:
+            # noinspection PyUnresolvedReferences
+            self.classes.add(label)
+        self.classes = list(self.classes)
 
         self.print_header()
 
         self.model.classes = self.classes
+
+        mmll_prev = float(sys.maxint)
+        iter_since_improv = 0
+
         for iter_ in range(nr_iter):
             start = time.clock()
             c_train = 0
-            n_train = 0
             for data, label in training_data:
+                tmp = np.zeros(len(self.classes))
+                tmp[self.classes.index(label)] = 1
+
                 feats = self._get_features(data)
-                guess = self.model.predict(feats)
-                self.model.update(label, guess, feats)
-                for real_key, key in LABEL_MAPPING.iteritems():
-                    c_train += guess.get(real_key) == getattr(label, key)
-                    n_train += 1
+                guess = self.model.predict_proba(feats)
+
+                c_train += np.argmax(guess) == np.argmax(tmp)
+
+                self.model.update(tmp, guess, feats)
+
+            preds, actuals = [], []
+            for data, label in training_data:
+                tmp = np.zeros(len(self.classes))
+                tmp[self.classes.index(label)] = 1
+
+                feats = self._get_features(data)
+                guess = self.model.predict_proba(feats)
+
+                preds.append(guess)
+                actuals.append(tmp)
+
+            mmll_train = scoring.multi_multi_log_loss(
+                np.array(preds),
+                np.array(actuals),
+                np.array([range(actuals[0].shape[0])])
+            )
+
+            def improvement(x, y):
+                return (x - y) / (2 * max(x, y))
+
+            imp = improvement(mmll_prev, mmll_train)
+            if imp < .005:
+                print('halving the learning rate: {} -> {}'.format(
+                    self.model.learning_rate,
+                    self.model.learning_rate / 2
+                ))
+                self.model.learning_rate /= 2
+                iter_since_improv += 1
+            else:
+                iter_since_improv = 0
+
+            if iter_since_improv >= 5:
+                print('no improvement in 5 iterations, stopping')
+                break
+
+            mmll_prev = mmll_train
+
             random.shuffle(training_data)
 
             c_test = 0
-            n_test = 0
-            actuals = []
-            predictions = []
+            preds, actuals = [], []
             for data, label in test_data:
+                tmp = np.zeros(len(self.classes))
+                tmp[self.classes.index(label)] = 1
+
                 feats = self._get_features(data)
-                guess = self.model.predict(feats)
-                for real_key, key in LABEL_MAPPING.iteritems():
-                    c_test += guess.get(real_key) == getattr(label, key)
-                    n_test += 1
+                guess = self.model.predict_proba(feats)
 
-                actuals.append(
-                    PerceptronModel.label_output(label)[1:]
-                )
-                predictions.append(
-                    PerceptronModel.prediction_output(data, guess)[1:]
-                )
+                c_test += np.argmax(guess) == np.argmax(tmp)
 
-            ll = scoring.multi_multi(actuals, predictions)
-            ll_correct = scoring.multi_multi_correct(actuals, predictions)
+                preds.append(guess)
+                actuals.append(tmp)
+
+            mmll_test = scoring.multi_multi_log_loss(
+                np.array(preds),
+                np.array(actuals),
+                np.array([range(actuals[0].shape[0])])
+            )
+
             end = time.clock()
 
             score = (
-                iter_, c_train, n_train, c_test, n_test, ll, ll_correct,
-                _td(end - start)
+                iter_, c_train, len(training_data), c_test, len(test_data),
+                mmll_train, mmll_test, _td(end - start)
             )
             self.print_score(score)
             self.scores.append(score)
@@ -121,17 +178,17 @@ class PerceptronModel(object):
             ' ' * 21,
             'test score',
             ' ' * 5,
-            'mc log loss',
-            ' ' * 5,
-            'mc log loss*',
-            ' ' * 5,
+            'train log loss',
+            ' ' * 2,
+            'test log loss',
+            ' ' * 4,
             'elapsed time'
         ])
         print(header)
         print('-' * len(header))
 
     def print_score(self, score):
-        print('{:02d}: {:>20} = {}% {:>20} = {}% {:>15} {:>16} {:>16}'.format(
+        print('{:02d}: {:>20} = {}% {:>20} = {}% {:>18} {:>14} {:>15}'.format(
             score[0],
             '{}/{}'.format(
                 locale.format('%d', score[1], grouping=True),
@@ -187,14 +244,39 @@ class PerceptronModel(object):
                     for l in args[0]:
                         features[' '.join([name, l])] += 1
                 else:
-                    features[' '.join(((name,) + tuple(args)))] += 1
+                    features[' '.join(((name,) + tuple(args,)))] += 1
             else:
                 features[name] += 1
 
         features = defaultdict(int)
-        for key in data.attributes:
-            name = INPUT_CODES[key]
-            add(name, getattr(data, key))
+
+        def bow(string):
+            # return util.sentence_splitter(string)
+            for word in re.findall(
+                    r'GRADE=k\|k|GRADE=k\|\d+|GRADE=\d+\|\d+|\w+|\d+|\.',
+                    string
+            ):
+                yield word
+
+        for attr in Data.text_attributes:
+            value = data.cleaned[attr + '-mapped']
+            # value = getattr(data, attr)
+            b_o_w = []
+            for i in bow(value):
+                i = sbs.stem(i)
+                b_o_w.append(i)
+
+            # need 1 before and 1 after to support 3-grams
+            # e.g. board ENDHERE BEGHERE something
+            #     |---------------------|
+            ng = all_ngrams(b_o_w, 3)
+            add(attr, ng)
+
+        for idx, grade in enumerate(data.grades):
+            add('gr {}'.format(idx), str(int(grade)))
+
+        for idx, title in enumerate(data.title):
+            add('ttl {}'.format(idx), str(int(title)))
 
         # it's useful to have a constant feature which acts sort of like a prior
         add('bias')

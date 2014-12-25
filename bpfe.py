@@ -1,10 +1,14 @@
+# coding=utf-8
+
 import gzip
 from itertools import izip
 import os
 from os.path import dirname
+import random
 import sys
 import time
 import math
+import itertools
 import theano
 from theano.tensor.shared_randomstreams import RandomStreams
 from bpfe import scoring, save, cache
@@ -141,6 +145,42 @@ def vectorize(generator, X, Y, settings, klass_num):
         yield data_len
 
 
+def create_uniques():
+    s = Settings()
+    s.chunks = ChunkSettings(sys.maxint, sys.maxint, sys.maxint)
+
+    tr = [i for i in load.gen_train(s)][0]
+    t = [i for i in load.gen_test(s)][0]
+    v = [i for i in load.gen_validate(s)][0]
+
+    train = list(set(tr).union(set(t)).union(set(v)))
+
+    sm = [i for i in load.gen_submission(s)][0]
+    submission = list(set(sm))
+
+    random.seed(1)
+    random.shuffle(train)
+
+    test = train[:7000]
+    train = train[7000:]
+    validate = train[:5000]
+    train = train[5000:]
+
+    print(len(train), len(submission))
+
+    with open('data/unique-train.pkl', 'wb') as ifile:
+        pickle.dump(train, ifile, -1)
+
+    with open('data/unique-validate.pkl', 'wb') as ifile:
+        pickle.dump(validate, ifile, -1)
+
+    with open('data/unique-test.pkl', 'wb') as ifile:
+        pickle.dump(test, ifile, -1)
+
+    with open('data/unique-submission.pkl', 'wb') as ifile:
+        pickle.dump(submission, ifile, -1)
+
+
 def run():
     # facility_or_department.info()
     # program_description.info()
@@ -153,13 +193,15 @@ def run():
     # fund_description.info()
     # object_description.info()
     # text_1.info()
-    all_text_rows.info()
+    # all_text_rows.info()
 
     # text_2.info()
     # text_3.info()
     # text_4.info()
     # fte.info()
     # total.info()
+
+    create_uniques()
 
     # load.store_raw()
 
@@ -180,6 +222,7 @@ def run():
     #
     # pm.train(train, test, AMT, nr_iter=ITERATIONS, seed=SEED, save_loc=loc)
     # plotting.plot_train_vs_validation(pm.scores, AMT)
+    pass
 
 
 def predict():
@@ -896,6 +939,6 @@ if __name__ == '__main__':
     # predict()
     # predict_train()
     # DBN_tuning()
-    DBN_run()
-    # run()
+    # DBN_run()
+    run()
     # stats()

@@ -169,6 +169,23 @@ LABELS = {
     ]
 }
 
+GRADE_ORDER = dict([
+    ('0', 0),
+    ('k', 1),
+    ('1', 2),
+    ('2', 3),
+    ('3', 4),
+    ('4', 5),
+    ('5', 6),
+    ('6', 7),
+    ('7', 8),
+    ('8', 9),
+    ('9', 10),
+    ('10', 11),
+    ('11', 12),
+    ('12', 13),
+])
+
 FLAT_LABELS = []
 tups = [(k, v) for k, v in LABELS.iteritems()]
 tups.sort(key=lambda x: x[0])
@@ -406,7 +423,7 @@ class ChunkSettings(object):
 
     def __eq__(self, other):
         return \
-            self.train == other.train and \
+            self.train == other._train and \
             self.validate == other.validate and \
             self.test == other.test and \
             self.submission == other.submission
