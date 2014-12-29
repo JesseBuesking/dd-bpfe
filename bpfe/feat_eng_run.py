@@ -1289,6 +1289,8 @@ def weighted_average_pred(name='train', unique=True):
                 ]
                 assert classes[0] == labels
                 num_classifiers = len(classifiers)
+                # to get just the logistic regression score
+                # num_classifiers = 1
 
                 pp = []
                 for nidx in range(num_classifiers):

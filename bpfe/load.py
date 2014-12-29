@@ -183,7 +183,7 @@ def ugen_submission(unique=True):
         yield data
 
 
-def _ugen_name(name, unique=False):
+def _ugen_name(name, unique=True):
     if unique:
         fname = 'data/unique-{}.pkl'.format(name)
     else:
