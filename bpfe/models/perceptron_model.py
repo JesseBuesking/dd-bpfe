@@ -18,12 +18,22 @@ import pickle
 import time
 import numpy as np
 from bpfe import scoring
-from bpfe.config import LABEL_MAPPING, FLAT_LABELS, INPUT_CODES
+from bpfe.config import LABEL_MAPPING, FLAT_LABELS
 from bpfe.models._perceptron import AveragedPerceptron
 from nltk.stem import SnowballStemmer
+from nltk.corpus import stopwords
 
 
+stop = stopwords.words('english')
 sbs = SnowballStemmer('english')
+
+
+def bow(string):
+    for word in re.findall(
+        r'GRADE=k\|k|GRADE=k\|\d+|GRADE=\d+\|\d+|\w+|\d+|\.',
+        string
+    ):
+        yield word
 
 
 class PerceptronModel(object):
@@ -123,8 +133,8 @@ class PerceptronModel(object):
             else:
                 iter_since_improv = 0
 
-            if iter_since_improv >= 5:
-                print('no improvement in 5 iterations, stopping')
+            if iter_since_improv >= 10:
+                print('no improvement in 10 iterations, stopping')
                 break
 
             mmll_prev = mmll_train
@@ -238,25 +248,17 @@ class PerceptronModel(object):
         {hashable: float} dict. If the features change, a new model must be
         trained.
         """
-        def add(name, *args):
+        def add(name, amount, *args):
             if len(args) > 0:
                 if isinstance(args[0], list):
                     for l in args[0]:
-                        features[' '.join([name, l])] += 1
+                        features[' '.join([name, l])] += amount
                 else:
-                    features[' '.join(((name,) + tuple(args,)))] += 1
+                    features[' '.join(((name,) + tuple(args,)))] += amount
             else:
-                features[name] += 1
+                features[name] += amount
 
         features = defaultdict(int)
-
-        def bow(string):
-            # return util.sentence_splitter(string)
-            for word in re.findall(
-                    r'GRADE=k\|k|GRADE=k\|\d+|GRADE=\d+\|\d+|\w+|\d+|\.',
-                    string
-            ):
-                yield word
 
         for attr in Data.text_attributes:
             value = data.cleaned[attr + '-mapped']
@@ -266,20 +268,19 @@ class PerceptronModel(object):
                 i = sbs.stem(i)
                 b_o_w.append(i)
 
-            # need 1 before and 1 after to support 3-grams
-            # e.g. board ENDHERE BEGHERE something
-            #     |---------------------|
             ng = all_ngrams(b_o_w, 3)
-            add(attr, ng)
+            ng = [i for i in ng if i not in stop]
+            add(attr, 1, ng)
+            add('ng', 1, ng)
 
         for idx, grade in enumerate(data.grades):
-            add('gr {}'.format(idx), str(int(grade)))
+            add('gr {}'.format(idx), 1, str(int(grade)))
 
         for idx, title in enumerate(data.title):
-            add('ttl {}'.format(idx), str(int(title)))
+            add('ttl {}'.format(idx), 1, str(int(title)))
 
         # it's useful to have a constant feature which acts sort of like a prior
-        add('bias')
+        add('bias', 1)
         return features
 
     @staticmethod

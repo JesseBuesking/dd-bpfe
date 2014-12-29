@@ -58,6 +58,14 @@ def all_ngrams(values, n):
     return il
 
 
+def all_ngrams_list(values, n):
+    l = len(values)
+    # noinspection PyArgumentList
+    il = [values[i:j+1] for i in xrange(l) for j in xrange(i, l)]
+    il = [i for i in il if len(i) <= n]
+    return il
+
+
 def find_ngrams(input_list, n):
     return list(zip(*[input_list[i:] for i in range(n)]))
 

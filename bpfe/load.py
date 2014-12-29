@@ -163,28 +163,32 @@ def _gen_name(name, num_chunks, batch_size=None):
             yield data
 
 
-def ugen_validate():
+def ugen_validate(unique=True):
     for data in _ugen_name('validate'):
         yield data
 
 
-def ugen_test():
+def ugen_test(unique=True):
     for data in _ugen_name('test'):
         yield data
 
 
-def ugen_train():
+def ugen_train(unique=True):
     for data in _ugen_name('train'):
         yield data
 
 
-def ugen_submission():
-    for data in _ugen_name('submission'):
+def ugen_submission(unique=True):
+    for data in _ugen_name('submission', unique):
         yield data
 
 
-def _ugen_name(name):
-    with open('data/unique-{}.pkl'.format(name), 'rb') as datafile:
+def _ugen_name(name, unique=False):
+    if unique:
+        fname = 'data/unique-{}.pkl'.format(name)
+    else:
+        fname = 'data/{}.pkl'.format(name)
+    with open(fname, 'rb') as datafile:
         data = pickle.load(datafile)
         for row in data:
             yield row

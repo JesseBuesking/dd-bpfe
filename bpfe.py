@@ -156,6 +156,7 @@ def create_uniques():
     train = list(set(tr).union(set(t)).union(set(v)))
 
     sm = [i for i in load.gen_submission(s)][0]
+    sm_all = sm
     submission = list(set(sm))
 
     random.seed(1)
@@ -166,19 +167,22 @@ def create_uniques():
     validate = train[:5000]
     train = train[5000:]
 
-    print(len(train), len(submission))
+    print(len(train), len(submission), len(sm_all))
 
-    with open('data/unique-train.pkl', 'wb') as ifile:
-        pickle.dump(train, ifile, -1)
+    # with open('data/unique-train.pkl', 'wb') as ifile:
+    #     pickle.dump(train, ifile, -1)
+    #
+    # with open('data/unique-validate.pkl', 'wb') as ifile:
+    #     pickle.dump(validate, ifile, -1)
+    #
+    # with open('data/unique-test.pkl', 'wb') as ifile:
+    #     pickle.dump(test, ifile, -1)
+    #
+    # with open('data/unique-submission.pkl', 'wb') as ifile:
+    #     pickle.dump(submission, ifile, -1)
 
-    with open('data/unique-validate.pkl', 'wb') as ifile:
-        pickle.dump(validate, ifile, -1)
-
-    with open('data/unique-test.pkl', 'wb') as ifile:
-        pickle.dump(test, ifile, -1)
-
-    with open('data/unique-submission.pkl', 'wb') as ifile:
-        pickle.dump(submission, ifile, -1)
+    with open('data/submission.pkl', 'wb') as ifile:
+        pickle.dump(sm_all, ifile, -1)
 
 
 def run():

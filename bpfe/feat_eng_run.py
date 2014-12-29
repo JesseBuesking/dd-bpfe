@@ -1,8 +1,11 @@
+import gzip
+import os
 from os.path import dirname
 import pickle
 import re
 import math
 from nltk import NaiveBayesClassifier, SklearnClassifier, accuracy
+from scipy.sparse import hstack, vstack
 from sklearn import cross_validation
 from sklearn.decomposition import TruncatedSVD
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier, ExtraTreesClassifier
@@ -16,8 +19,8 @@ from sklearn.pipeline import Pipeline
 import sys
 import time
 from bpfe import load, util, feature_engineering, scoring
-from bpfe.config import Settings, ChunkSettings
-from bpfe.entities import Data
+from bpfe.config import Settings, ChunkSettings, KLASS_LABEL_INFO, LABEL_MAPPING, LABELS, FLAT_LABELS
+from bpfe.entities import Data, Label
 import numpy as np
 from unidecode import unidecode
 from bpfe.load import ugen_train, ugen_validate, ugen_test, ugen_submission
@@ -28,6 +31,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from nltk.stem import SnowballStemmer
+from bpfe.vectorizer.BPFEVectorizer import BPFEVectorizer
 
 
 sbs = SnowballStemmer('english')
@@ -41,45 +45,57 @@ def bow(string):
 
 
 def get_x_y(name, generator):
-    x, y = [], []
-    uq = set()
-    uqsbs = set()
-    for data, label in generator:
-        row = []
-        for attr in Data.text_attributes:
-            value = data.cleaned[attr + '-mapped']
-            # value = getattr(data, attr)
-            b_o_w = []
-            for i in bow(value):
-                uq.add(i)
-                i = sbs.stem(i)
-                uqsbs.add(i)
-                b_o_w.append(i)
-            # need 1 before and 1 after to support 3-grams
-            # e.g. board ENDHERE BEGHERE something
-            #     |---------------------|
-            row += ['BEGHERE'] + b_o_w + ['ENDHERE']
+    bv = BPFEVectorizer()
+    vect_data = bv.fit_transform([i for i, _ in generator])
+    labels = [i.function for _, i in generator if i is not None]
 
-        x.append(' '.join(row))
-        if label is not None:
-            y.append(label.function)
-        else:
-            y = None
-    print('uq {}: {}'.format(name, len(uq)))
-    print('uqsbs {}: {}'.format(name, len(uqsbs)))
-    return x, y
+    return vect_data, labels
+
+
+# def get_x_y(name, generator):
+#     x, y = [], []
+#     uq = set()
+#     uqsbs = set()
+#     for data, label in generator:
+#         row = []
+#         for attr in Data.text_attributes:
+#             value = data.cleaned[attr + '-mapped']
+#             # value = getattr(data, attr)
+#             b_o_w = []
+#             for i in bow(value):
+#                 uq.add(i)
+#                 i = sbs.stem(i)
+#                 uqsbs.add(i)
+#                 b_o_w.append(i)
+#             # need 1 before and 1 after to support 3-grams
+#             # e.g. board ENDHERE BEGHERE something
+#             #     |---------------------|
+#             row += ['BEGHERE'] + b_o_w + ['ENDHERE']
+#
+#         x.append(' '.join(row))
+#         if label is not None:
+#             y.append(label.function)
+#         else:
+#             y = None
+#     print('uq {}: {}'.format(name, len(uq)))
+#     print('uqsbs {}: {}'.format(name, len(uqsbs)))
+#     return x, y
 
 
 def ll_score(classifier, klasses, tX, tY):
-    predictions = classifier.predict_proba(tX)
-    lls = 0
-    for actual, expected in zip(predictions, tY):
+    preds = classifier.predict_proba(tX)
+    actuals = []
+    for expected in tY:
         tmp = np.zeros(len(klasses))
         tmp[klasses.index(expected)] = 1
-        ll = log_loss(tmp, actual)
-        lls += ll
+        actuals.append(tmp)
 
-    return lls / float(len(predictions))
+    mmll = scoring.multi_multi_log_loss(
+        np.array(preds),
+        np.array(actuals),
+        np.array([range(actuals[0].shape[0])])
+    )
+    return mmll
 
 
 def kf(pipeline, tx, ty, name, k=5, idx=None):
@@ -297,74 +313,94 @@ def rf_tuning(plot_me=False):
             print(df.head(sys.maxint))
             return
 
-    train = [i for i in ugen_train()]
-    train_x, train_y = get_x_y('train', train)
+    num = 10000
+    tx, ty = [], []
+    for idx, (d, l) in enumerate(ugen_train()):
+        if idx >= num:
+            break
 
-    num = 20000
-    tx, ty = train_x[:num], train_y[:num]
+        tx.append(d)
+        ty.append(l.function)
 
     best = (sys.maxint, 0, '')
     scores = []
-    for vect__min_df in [3]:
-        for vect__binary in [False]:
-            for classifier__max_depth in [9, 12, 15]:
-                for classifier__max_features in [200, 400]:
-                    for classifier__criterion in ['gini', 'entropy']:
-                        pstring = ', '.join([
-                            'vect__min_df: {}'.format(vect__min_df),
-                            'vect__binary: {}'.format(vect__binary),
-                            'classifier__max_depth: {}'.format(
-                                classifier__max_depth),
-                            'classifier__max_features: {}'.format(
-                                classifier__max_features),
-                            'classifier__criterion: {}'.format(
-                                classifier__criterion)
-                        ])
-                        print(pstring)
-                        start = time.clock()
-                        pipeline = Pipeline([
-                            ('vect',
-                             CountVectorizer(
-                                 stop_words='english',
-                                 ngram_range=(1, 3),
-                                 min_df=vect__min_df,
-                                 binary=vect__binary
-                             )),
-                            ('chi2',
-                             SelectKBest(
-                                 chi2,
-                                 k=1000
-                             )),
-                            ('todense', DenseTransformer()),
-                            ('classifier',
-                             RandomForestClassifier(
-                                 max_depth=classifier__max_depth,
-                                 max_features=classifier__max_features,
-                                 bootstrap=True,
-                                 criterion=classifier__criterion,
-                                 random_state=1,
-                                 oob_score=True
-                             )),
-                        ])
+    for vect__ngrams in [1]:
+        for vect__use_grades in [True]:
+            for vect__use_titles in [True]:
+                for vect__filter_stopwords in [True, False]:
+                    for vect__binarize in [True, False]:
+                        for vect__min_df in [1, 3]:
+                            for classifier__max_depth in [9, 12, 15]:
+                                for classifier__max_features in [200, 400]:
+                                    for classifier__criterion in ['gini', 'entropy']:
+                                        pstring = ', '.join([
+                                            'vect__ngrams: {}'.format(
+                                                vect__ngrams),
+                                            'vect__use_grades: {}'.format(
+                                                vect__use_grades),
+                                            'vect__use_titles: {}'.format(
+                                                vect__use_titles),
+                                            'vect__filter_stopwords: {}'.format(
+                                                vect__filter_stopwords),
+                                            'vect__binarize: {}'.format(
+                                                vect__binarize),
+                                            'vect__min_df: {}'.format(
+                                                vect__min_df),
+                                            'classifier__max_depth: {}'.format(
+                                                classifier__max_depth),
+                                            'classifier__max_features: {}'.format(
+                                                classifier__max_features),
+                                            'classifier__criterion: {}'.format(
+                                                classifier__criterion)
+                                        ])
+                                        print(pstring)
+                                        start = time.clock()
+                                        pipeline = Pipeline([
+                                            ('vect',
+                                             BPFEVectorizer(
+                                                 ngrams=vect__ngrams,
+                                                 stemmer=sbs,
+                                                 use_grades=vect__use_grades,
+                                                 use_titles=vect__use_titles,
+                                                 filter_stopwords=vect__filter_stopwords,
+                                                 binarize=vect__binarize,
+                                                 min_df=vect__min_df
+                                             )),
+                                            # ('chi2',
+                                            #  SelectKBest(
+                                            #      chi2,
+                                            #      k=1000
+                                            #  )),
+                                            ('todense', DenseTransformer()),
+                                            ('classifier',
+                                             RandomForestClassifier(
+                                                 max_depth=classifier__max_depth,
+                                                 max_features=classifier__max_features,
+                                                 bootstrap=True,
+                                                 criterion=classifier__criterion,
+                                                 random_state=1,
+                                                 oob_score=True
+                                             )),
+                                        ])
 
-                        s = kf(pipeline, tx, ty, pstring, k=3)
-                        scores += s
-                        ss = [i[1] for i in s]
-                        mn = np.mean(ss)
-                        std = np.std(ss)
-                        print('{:.4f} +/- {:.4f} after {}'.format(
-                            mn,
-                            std,
-                            time.clock() - start
-                        ))
-                        if mn < best[0]:
-                            best = (mn, std, pstring)
+                                        s = kf(pipeline, tx, ty, pstring, k=3)
+                                        scores += s
+                                        ss = [i[1] for i in s]
+                                        mn = np.mean(ss)
+                                        std = np.std(ss)
+                                        print('{:.4f} +/- {:.4f} after {}'.format(
+                                            mn,
+                                            std,
+                                            time.clock() - start
+                                        ))
+                                        if mn < best[0]:
+                                            best = (mn, std, pstring)
 
     print('best:')
     print(best)
 
-    with open(fname, 'wb') as ifile:
-        pickle.dump(scores, ifile, -1)
+    # with open(fname, 'wb') as ifile:
+    #     pickle.dump(scores, ifile, -1)
 
 
 def ada_rf_tuning(plot_me=False):
@@ -385,54 +421,71 @@ def ada_rf_tuning(plot_me=False):
 
     best = (sys.maxint, 0, '')
     scores = []
-    for vect__min_df in [3]:
-        for vect__binary in [False]:
-            for classifier__n_estimators in [50, 100]:
-                for classifier__learning_rate in [.1, 1, 10]:
-                    pstring = ', '.join([
-                        'vect__min_df: {}'.format(vect__min_df),
-                        'vect__binary: {}'.format(vect__binary),
-                        'classifier__n_estimators: {}'.format(
-                            classifier__n_estimators),
-                        'classifier__learning_rate: {}'.format(
-                            classifier__learning_rate)
-                    ])
-                    print(pstring)
-                    start = time.clock()
-                    pipeline = Pipeline([
-                        ('vect',
-                         CountVectorizer(
-                             stop_words='english',
-                             ngram_range=(1, 3),
-                             min_df=vect__min_df,
-                             binary=vect__binary
-                         )),
-                        ('chi2',
-                         SelectKBest(
-                             chi2,
-                             k=2000
-                         )),
-                        ('todense', DenseTransformer()),
-                        ('classifier',
-                         AdaBoostClassifier(
-                             base_estimator=ExtraTreesClassifier(),
-                             n_estimators=classifier__n_estimators,
-                             learning_rate=classifier__learning_rate
-                         )),
-                    ])
+    for vect__ngrams in [1, 2, 3]:
+        for vect__use_grades in [True]:
+            for vect__use_titles in [True]:
+                for vect__filter_stopwords in [True, False]:
+                    for vect__binarize in [True, False]:
+                        for vect__min_df in [1, 3]:
+                            for classifier__n_estimators in [50, 100]:
+                                for classifier__learning_rate in [.1, 1, 10]:
+                                    pstring = ', '.join([
+                                        'vect__ngrams: {}'.format(
+                                            vect__ngrams),
+                                        'vect__use_grades: {}'.format(
+                                            vect__use_grades),
+                                        'vect__use_titles: {}'.format(
+                                            vect__use_titles),
+                                        'vect__filter_stopwords: {}'.format(
+                                            vect__filter_stopwords),
+                                        'vect__binarize: {}'.format(
+                                            vect__binarize),
+                                        'vect__min_df: {}'.format(
+                                            vect__min_df),
+                                        'classifier__n_estimators: {}'.format(
+                                            classifier__n_estimators),
+                                        'classifier__learning_rate: {}'.format(
+                                            classifier__learning_rate)
+                                    ])
+                                    print(pstring)
+                                    start = time.clock()
+                                    pipeline = Pipeline([
+                                        ('vect',
+                                         BPFEVectorizer(
+                                             ngrams=vect__ngrams,
+                                             stemmer=sbs,
+                                             use_grades=vect__use_grades,
+                                             use_titles=vect__use_titles,
+                                             filter_stopwords=vect__filter_stopwords,
+                                             binarize=vect__binarize,
+                                             min_df=vect__min_df
+                                         )),
+                                        ('chi2',
+                                         SelectKBest(
+                                             chi2,
+                                             k=1000
+                                         )),
+                                        ('todense', DenseTransformer()),
+                                        ('classifier',
+                                         AdaBoostClassifier(
+                                             # base_estimator=ExtraTreesClassifier(),
+                                             n_estimators=classifier__n_estimators,
+                                             learning_rate=classifier__learning_rate
+                                         )),
+                                    ])
 
-                    s = kf(pipeline, tx, ty, pstring, k=3)
-                    scores += s
-                    ss = [i[1] for i in s]
-                    mn = np.mean(ss)
-                    std = np.std(ss)
-                    print('{:.4f} +/- {:.4f} after {}'.format(
-                        mn,
-                        std,
-                        time.clock() - start
-                    ))
-                    if mn < best[0]:
-                        best = (mn, std, pstring)
+                                    s = kf(pipeline, tx, ty, pstring, k=3)
+                                    scores += s
+                                    ss = [i[1] for i in s]
+                                    mn = np.mean(ss)
+                                    std = np.std(ss)
+                                    print('{:.4f} +/- {:.4f} after {}'.format(
+                                        mn,
+                                        std,
+                                        time.clock() - start
+                                    ))
+                                    if mn < best[0]:
+                                        best = (mn, std, pstring)
 
     print('best:')
     print(best)
@@ -531,55 +584,75 @@ def naive_bayes_tuning(plot_me=False):
             print(df.head(sys.maxint))
             return
 
-    train = [i for i in ugen_train()]
-    train_x, train_y = get_x_y('train', train)
+    num = 10000
+    tx, ty = [], []
+    for idx, (d, l) in enumerate(ugen_train()):
+        if idx >= num:
+            break
 
-    num = 20000
-    tx, ty = train_x[:num], train_y[:num]
+        tx.append(d)
+        ty.append(l.function)
 
     best = (sys.maxint, 0, '')
     scores = []
-    for vect__min_df in [3]:
-        for vect__binary in [True, False]:
-            for classifier__alpha in [.1, .5, 1]:
-                for classifier__fit_prior in [False]:
-                    pstring = ', '.join([
-                        'vect__min_df: {}'.format(vect__min_df),
-                        'vect__binary: {}'.format(vect__binary),
-                        'classifier__alpha: {}'.format(
-                            classifier__alpha),
-                        'classifier__fit_prior: {}'.format(
-                            classifier__fit_prior)
-                    ])
-                    print(pstring)
-                    start = time.clock()
-                    pipeline = Pipeline([
-                        ('vect',
-                         CountVectorizer(
-                             stop_words='english',
-                             ngram_range=(1, 3),
-                             min_df=vect__min_df,
-                             binary=vect__binary
-                         )),
-                        ('classifier',
-                         MultinomialNB(
-                             alpha=classifier__alpha,
-                             fit_prior=classifier__fit_prior
-                         )),
-                    ])
+    for vect__ngrams in [1, 2, 3]:
+        for vect__use_grades in [True]:
+            for vect__use_titles in [True]:
+                for vect__filter_stopwords in [True, False]:
+                    for vect__binarize in [True, False]:
+                        for vect__min_df in [1, 3]:
+                            for classifier__alpha in [.1, .5, 1]:
+                                for classifier__fit_prior in [False]:
+                                    pstring = ', '.join([
+                                        'vect__ngrams: {}'.format(
+                                            vect__ngrams),
+                                        'vect__use_grades: {}'.format(
+                                            vect__use_grades),
+                                        'vect__use_titles: {}'.format(
+                                            vect__use_titles),
+                                        'vect__filter_stopwords: {}'.format(
+                                            vect__filter_stopwords),
+                                        'vect__binarize: {}'.format(
+                                            vect__binarize),
+                                        'vect__min_df: {}'.format(
+                                            vect__min_df),
+                                        'classifier__alpha: {}'.format(
+                                            classifier__alpha),
+                                        'classifier__fit_prior: {}'.format(
+                                            classifier__fit_prior)
+                                    ])
+                                    print(pstring)
+                                    start = time.clock()
+                                    pipeline = Pipeline([
+                                        ('vect',
+                                         BPFEVectorizer(
+                                             ngrams=vect__ngrams,
+                                             stemmer=sbs,
+                                             use_grades=vect__use_grades,
+                                             use_titles=vect__use_titles,
+                                             filter_stopwords=vect__filter_stopwords,
+                                             binarize=vect__binarize,
+                                             min_df=vect__min_df
+                                         )),
+                                        ('classifier',
+                                         MultinomialNB(
+                                             alpha=classifier__alpha,
+                                             fit_prior=classifier__fit_prior
+                                         )),
+                                    ])
 
-                    s = kf(pipeline, tx, ty, pstring, k=3)
-                    scores += s
-                    ss = [i[1] for i in s]
-                    mn = np.mean(ss)
-                    std = np.std(ss)
-                    print('{:.4f} +/- {:.4f} after {}'.format(
-                        mn,
-                        std,
-                        time.clock() - start
-                    ))
-                    if mn < best[0]:
-                        best = (mn, std, pstring)
+                                    s = kf(pipeline, tx, ty, pstring, k=3)
+                                    scores += s
+                                    ss = [i[1] for i in s]
+                                    mn = np.mean(ss)
+                                    std = np.std(ss)
+                                    print('{:.4f} +/- {:.4f} after {}'.format(
+                                        mn,
+                                        std,
+                                        time.clock() - start
+                                    ))
+                                    if mn < best[0]:
+                                        best = (mn, std, pstring)
 
     print('best:')
     print(best)
@@ -598,64 +671,86 @@ def log_reg_tuning(plot_me=False):
             print(df.head(sys.maxint))
             return
 
-    train = [i for i in ugen_train()]
-    train_x, train_y = get_x_y('train', train)
+    num = 10000
+    tx, ty = [], []
+    for idx, (d, l) in enumerate(ugen_train()):
+        if idx >= num:
+            break
 
-    num = 20000
-    tx, ty = train_x[:num], train_y[:num]
+        tx.append(d)
+        ty.append(l.function)
 
     best = (sys.maxint, 0, '')
     scores = []
-    for vect__min_df in [3]:
-        for vect__binary in [False]:
-            for tfidf__norm in [None, 'l2']:
-                for classifier__C in [.1, 1]:
-                    for classifier__penalty in ['l1']:
-                        for classifier__fit_intercept in [False, True]:
-                            pstring = ', '.join([
-                                'vect__min_df: {}'.format(vect__min_df),
-                                'vect__binary: {}'.format(vect__binary),
-                                'tfidf__norm: {}'.format(tfidf__norm),
-                                'classifier__C: {}'.format(classifier__C),
-                                'classifier__penalty: {}'.format(
-                                    classifier__penalty),
-                                'classifier__fit_intercept: {}'.format(
-                                    classifier__fit_intercept),
-                            ])
-                            print(pstring)
-                            start = time.clock()
-                            pipeline = Pipeline([
-                                ('vect',
-                                 CountVectorizer(
-                                     stop_words='english',
-                                     ngram_range=(1, 3),
-                                     min_df=vect__min_df,
-                                     binary=vect__binary
-                                 )),
-                                ('tfidf',
-                                 TfidfTransformer(
-                                     norm=tfidf__norm
-                                 )),
-                                ('classifier',
-                                 LogisticRegression(
-                                     C=classifier__C,
-                                     penalty=classifier__penalty,
-                                     fit_intercept=classifier__fit_intercept
-                                 ))
-                            ])
+    for vect__ngrams in [1, 2, 3]:
+        for vect__use_grades in [True, False]:
+            for vect__use_titles in [True, False]:
+                for vect__filter_stopwords in [True, False]:
+                    for vect__binarize in [True, False]:
+                        for vect__min_df in [1, 3, 5]:
+                            for tfidf__norm in ['l2']:
+                                for classifier__C in [10]:
+                                    for classifier__penalty in ['l1']:
+                                        for classifier__fit_intercept in [True]:
+                                            pstring = ', '.join([
+                                                'vect__ngrams: {}'.format(
+                                                    vect__ngrams),
+                                                'vect__use_grades: {}'.format(
+                                                    vect__use_grades),
+                                                'vect__use_titles: {}'.format(
+                                                    vect__use_titles),
+                                                'vect__filter_stopwords: {}'.format(
+                                                    vect__filter_stopwords),
+                                                'vect__binarize: {}'.format(
+                                                    vect__binarize),
+                                                'vect__min_df: {}'.format(
+                                                    vect__min_df),
+                                                'tfidf__norm: {}'.format(
+                                                    tfidf__norm),
+                                                'classifier__C: {}'.format(
+                                                    classifier__C),
+                                                'classifier__penalty: {}'.format(
+                                                    classifier__penalty),
+                                                'classifier__fit_intercept: {}'.format(
+                                                    classifier__fit_intercept),
+                                            ])
+                                            print(pstring)
+                                            start = time.clock()
+                                            pipeline = Pipeline([
+                                                ('vect',
+                                                 BPFEVectorizer(
+                                                     ngrams=vect__ngrams,
+                                                     stemmer=sbs,
+                                                     use_grades=vect__use_grades,
+                                                     use_titles=vect__use_titles,
+                                                     filter_stopwords=vect__filter_stopwords,
+                                                     binarize=vect__binarize,
+                                                     min_df=vect__min_df
+                                                 )),
+                                                ('tfidf',
+                                                 TfidfTransformer(
+                                                     norm=tfidf__norm
+                                                 )),
+                                                ('classifier',
+                                                 LogisticRegression(
+                                                     C=classifier__C,
+                                                     penalty=classifier__penalty,
+                                                     fit_intercept=classifier__fit_intercept
+                                                 ))
+                                            ])
 
-                            s = kf(pipeline, tx, ty, pstring, k=3)
-                            scores += s
-                            ss = [i[1] for i in s]
-                            mn = np.mean(ss)
-                            std = np.std(ss)
-                            print('{:.4f} +/- {:.4f} after {}'.format(
-                                mn,
-                                std,
-                                time.clock() - start
-                            ))
-                            if mn < best[0]:
-                                best = (mn, std, pstring)
+                                            s = kf(pipeline, tx, ty, pstring, k=3)
+                                            scores += s
+                                            ss = [i[1] for i in s]
+                                            mn = np.mean(ss)
+                                            std = np.std(ss)
+                                            print('{:.4f} +/- {:.4f} after {}'.format(
+                                                mn,
+                                                std,
+                                                time.clock() - start
+                                            ))
+                                            if mn < best[0]:
+                                                best = (mn, std, pstring)
 
     print('best:')
     print(best)
@@ -688,7 +783,7 @@ def avg_perc_tuning(plot_me=False):
 
         pm = PerceptronModel()
         pm.train(
-            train_x2, test_x2, sys.maxint, nr_iter=50, seed=1, save_loc=None)
+            train_x2, test_x2, sys.maxint, nr_iter=75, seed=1, save_loc=None)
 
         preds = []
         actuals = []
@@ -722,149 +817,252 @@ def avg_perc_tuning(plot_me=False):
         pickle.dump(scores, ifile, -1)
 
 
-def weighted_average():
-    log_reg_classifier = Pipeline([
-        ('vect',
-         CountVectorizer(
-             stop_words='english',
-             ngram_range=(1, 3),
-             min_df=3,
-             binary=False
-         )),
-        ('tfidf',
-         TfidfTransformer(
-             norm='l2'
-         )),
-        ('classifier',
-         LogisticRegression(
-             C=10,
-             penalty='l1',
-             fit_intercept=True
-         ))
-    ])
+# noinspection PyDefaultArgument
+def get_vects(name, classifier_indices=[0, 1], indices=None, num=sys.maxint,
+              unique=False):
+    vects = [
+        BPFEVectorizer(
+            ngrams=2,
+            use_stemmer=True,
+            use_grades=True,
+            use_titles=True,
+            filter_stopwords=False,
+            binarize=True,
+            min_df=None
+        ),
+        BPFEVectorizer(
+            ngrams=1,
+            use_stemmer=True,
+            use_grades=True,
+            use_titles=True,
+            filter_stopwords=True,
+            binarize=True,
+            min_df=1
+        )
+    ]
+    if unique:
+        vname = dirname(dirname(__file__)) + \
+            '/data/models/{}-vects.pkl'.format(name)
+    else:
+        vname = dirname(dirname(__file__)) + \
+            '/data/models/final-{}-vects.pkl'.format(name)
+    if not os.path.exists(vname):
+        if name == 'train':
+            g = ugen_train()
+        elif name == 'test':
+            g = ugen_test()
+        elif name == 'validate':
+            g = ugen_validate()
+        elif name == 'submission':
+            g = ugen_submission(unique)
+        else:
+            raise
 
-    nb_classifier = Pipeline([
-        ('vect',
-         CountVectorizer(
-             stop_words='english',
-             ngram_range=(1, 3),
-             min_df=3,
-             binary=True
-         )),
-        ('classifier',
-         MultinomialNB(
-             alpha=.5,
-             fit_prior=False
-         )),
-    ])
+        # save the vectorizers to disk
+        vzrs = dirname(dirname(__file__)) + '/data/models/vectorizers.pkl'
+        if not os.path.exists(vzrs):
+            with open(vzrs, 'wb') as ifile:
+                tx = []
+                for idx, (d, l) in enumerate(ugen_train()):
+                    if num < idx:
+                        break
+                    tx.append(d)
 
-    rf_classifier = Pipeline([
-        ('vect',
-         CountVectorizer(
-             stop_words='english',
-             ngram_range=(1, 3),
-             min_df=3,
-             binary=False
-         )),
-        ('chi2',
-         SelectKBest(
-             chi2,
-             k=1000
-         )),
-        ('todense', DenseTransformer()),
-        ('classifier',
-         RandomForestClassifier(
-             max_depth=12,
-             max_features=200,
-             bootstrap=True,
-             criterion='entropy',
-             random_state=1,
-             oob_score=True
-         )),
-    ])
+                for v in vects:
+                    v.fit_transform(tx)
+                pickle.dump(vects, ifile, -1)
+        else:
+            with open(vzrs, 'rb') as ifile:
+                vects = pickle.load(ifile)
 
-    num = 20000
-    train = [i for i in ugen_train()][:num]
-    tx, ty = get_x_y('train', train)
+        tx = []
+        for idx, (d, l) in enumerate(g):
+            if num < idx:
+                break
+            tx.append(d)
 
-    for train_ix, test_ix in cross_validation.KFold(len(tx), 5):
-        train_x2, train_y2 = [], []
-        test_x2, test_y2 = [], []
-        for tix in train_ix:
-            train_x2.append(tx[tix])
-            train_y2.append(ty[tix])
-        for tix in test_ix:
-            test_x2.append(tx[tix])
-            test_y2.append(ty[tix])
-        log_reg_classifier.fit(train_x2, train_y2)
-        nb_classifier.fit(train_x2, train_y2)
-        rf_classifier.fit(train_x2, train_y2)
+        # save the vectorized data to disk
+        with open(vname, 'wb') as ifile:
+            data = []
+            for i in range(len(vects)):
+                data.append([])
 
-        lr_c = list(log_reg_classifier.named_steps['classifier'].classes_)
-        nb_c = list(nb_classifier.named_steps['classifier'].classes_)
-        rf_c = list(rf_classifier.named_steps['classifier'].classes_)
+            for ridx, row in enumerate(tx):
+                for vidx, v in enumerate(vects):
+                    data[vidx].append(v.transform([row]))
 
-        lr_w = np.zeros(len(lr_c)) + .33
-        nb_w = np.zeros(len(lr_c)) + .33
-        rf_w = np.zeros(len(lr_c)) + .33
+            data = [vstack(i) for i in data]
+            pickle.dump(data, ifile, -1)
 
-        preds = []
-        actuals = []
-        for epoch in range(20):
-            lls = 0
-            for data, label in zip(test_x2, test_y2):
-                data = [data]
-                tmp = np.zeros(len(lr_c))
-                tmp[lr_c.index(label)] = 1.0
-                label = tmp
+    # load the vectorized data from disk
+    with open(vname, 'rb') as ifile:
+        data = pickle.load(ifile)
+        tmp = []
+        for ridx in classifier_indices:
+            t = data[ridx]
+            if num < t.shape[0]:
+                t = t[:num]
+            if indices is not None:
+                t = t[indices]
+            tmp.append(t)
+        if len(tmp) == 1:
+            return tmp[0]
+        else:
+            return tmp
 
-                lr_p = log_reg_classifier.predict_proba(data)[0]
-                nb_p = nb_classifier.predict_proba(data)[0]
-                rf_p = rf_classifier.predict_proba(data)[0]
 
-                def rearrange(klasses, preds, pred_klasses):
-                    tmp = np.zeros(len(klasses))
-                    for c in klasses:
-                        pidx = pred_klasses.index(c)
-                        tmp[pidx] = preds[pidx]
-                    return tmp
+# @profile
+def weighted_average(create_file=False):
+    num = sys.maxint
+    # num = 1000
+    kfolds = 5
+    num_classifiers = 2
 
-                pred = ((lr_w * lr_p) + (nb_w * nb_p) + (rf_w * rf_p)) / 3
-                preds.append(pred)
-                actuals.append(label)
+    total_rows = get_vects('train', [0], num=num).shape[0]
 
-                nb_p = rearrange(lr_c, nb_p, nb_c)
-                rf_p = rearrange(lr_c, rf_p, rf_c)
+    ifile = None
+    for attr in Label.__slots__:
+        if attr == 'id':
+            continue
 
-                lr_close = 1 - np.absolute(label - (lr_w * lr_p))
-                nb_close = 1 - np.absolute(label - (nb_w * nb_p))
-                rf_close = 1 - np.absolute(label - (rf_w * rf_p))
+        ty = []
+        for idx, (d, l) in enumerate(ugen_train()):
+            if num < idx:
+                break
+            ty.append(
+                getattr(l, attr)
+            )
+        ty = np.array(ty)
 
-                conc = np.array([lr_close, nb_close, rf_close])
-                conc = (conc - conc.min(axis=0)) / \
-                       (conc.max(axis=0) - conc.min(axis=0))
-                # conc = conc / conc.sum(axis=0)
-                conc[conc == 0] = 1e-6
+        fname = dirname(dirname(__file__)) + \
+            '/data/models/weighted-average-{}.pkl'.format(attr)
 
-                lr_change = conc[0]
-                nb_change = conc[1]
-                rf_change = conc[2]
+        if create_file:
+            if ifile is not None:
+                ifile.close()
+            ifile = gzip.open(fname + '.gz', 'wb')
 
-                ep = epoch + 1
-                lr_w = ((ep * lr_w) + lr_change) / (ep + 1)
-                nb_w = ((ep * nb_w) + nb_change) / (ep + 1)
-                rf_w = ((ep * rf_w) + rf_change) / (ep + 1)
+        for kidx, (train_ix, test_ix) in enumerate(
+                cross_validation.KFold(total_rows, kfolds)
+        ):
+            classifiers = [
+                Pipeline([
+                    ('tfidf',
+                     TfidfTransformer(
+                         norm='l2'
+                     )),
+                    ('classifier',
+                     LogisticRegression(
+                         C=10,
+                         penalty='l1',
+                         fit_intercept=True
+                     ))
+                ]),
+                Pipeline([
+                    ('chi2',
+                     SelectKBest(
+                         chi2,
+                         k=1000
+                     )),
+                    ('todense', DenseTransformer()),
+                    ('classifier',
+                     RandomForestClassifier(
+                         max_depth=12,
+                         max_features=200,
+                         bootstrap=True,
+                         criterion='entropy',
+                         random_state=1,
+                         oob_score=True
+                     )),
+                ])
+            ]
+
+            train_y2 = ty[train_ix]
+
+            print('training classifiers')
+            for idx in range(len(classifiers)):
+                print('training classifier {}'.format(idx))
+                vect = get_vects('train', [idx], train_ix, num)
+                classifiers[idx].fit(
+                    vect,
+                    train_y2
+                )
+
+            classes = [
+                list(i.named_steps['classifier'].classes_) for i in
+                classifiers
+            ]
+
+            print('vectorizing labels')
+            actuals = []
+            for cidx in range(ty.shape[0]):
+                label = ty[cidx]
+                tmp = np.zeros(len(classes[0]))
+                tmp[classes[0].index(label)] = 1.0
+                actuals.append(tmp)
+
+            test_y2 = np.array(actuals)[test_ix]
+
+            print('making predictions')
+            pp = []
+            for nidx in range(num_classifiers):
+                vect = get_vects('train', [nidx], test_ix, num=num)
+                pr = classifiers[nidx].predict_proba(vect)
+                pp.append(pr)
+
+            print('finding deltas')
+            deltas = []
+            for nidx in range(num_classifiers):
+                deltas.append(1 - (test_y2 - pp[nidx]))
+
+            print('computing adjusted weights')
+            adj_weights = []
+            for d in deltas:
+                adj_weights.append(
+                    (d - np.min(deltas, axis=0)) /
+                    (np.max(deltas, axis=0) - np.min(deltas, axis=0))
+                )
+
+            print('cleaning adjusted weights')
+            for i in range(len(adj_weights)):
+                nw = adj_weights[i]
+                # noinspection PyUnresolvedReferences
+                nw[np.isnan(nw)] = 1
+                eps = 1e-3
+                nw = np.clip(nw, eps, 1 - eps)
+                adj_weights[i] = nw
+
+            print('finding final weights')
+            weights = np.zeros((num_classifiers, len(classes[0]))) + \
+                (1 / float(num_classifiers))
+            for nidx, nw in enumerate(adj_weights):
+                weights[nidx] = np.mean(nw, axis=0)
+
+            print('making weighted predicts for mmll')
+            pp2 = []
+            for nidx in range(num_classifiers):
+                pr = pp[nidx] * weights[nidx]
+                pp2.append(pr)
+
+            preds = None
+            for p in pp2:
+                if preds is None:
+                    preds = p
+                else:
+                    preds += p
+            preds /= float(num_classifiers)
 
             mmll = scoring.multi_multi_log_loss(
                 np.array(preds),
-                np.array(actuals),
-                np.array([range(actuals[0].shape[0])])
+                np.array(test_y2),
+                np.array([range(test_y2.shape[1])])
             )
             print('mmll: {:.4f}'.format(mmll))
 
-        print('lr_w', lr_w)
-        print('nb_w', nb_w)
-        print('rf_w', rf_w)
+            print('weights', weights)
+
+            if create_file:
+                pickle.dump((weights, classifiers), ifile, -1)
 
 
 def blah():
@@ -1045,14 +1243,123 @@ def score_by_size_of_dataset(create_file=False, plot_stuff=True):
             pickle.dump(scores, ifile, -1)
 
 
+def weighted_average_pred(name='train', unique=True):
+    kfolds = 5
+
+    if name == 'train':
+        g = ugen_train
+    elif name == 'test':
+        g = ugen_test
+    elif name == 'validate':
+        g = ugen_validate
+    elif name == 'submission':
+        g = ugen_submission
+    else:
+        raise
+
+    ordered_classes = sorted(LABELS.keys())
+    all_preds = None
+    for klass in ordered_classes:
+        print('getting predictions for {}'.format(klass))
+        labels = LABELS[klass]
+        attr = LABEL_MAPPING[klass]
+
+        if name != 'submission':
+            ty = []
+            for idx, (d, l) in enumerate(g(unique=unique)):
+                ty.append(
+                    getattr(l, attr)
+                )
+            ty = np.array(ty)
+
+        fname = dirname(dirname(__file__)) + \
+            '/data/models/weighted-average-{}.pkl'.format(attr)
+
+        with gzip.open(fname + '.gz', 'rb') as ifile:
+            preds = []
+            for i in range(kfolds):
+                preds.append(None)
+
+            for i in range(kfolds):
+                weights, classifiers = pickle.load(ifile)
+
+                classes = [
+                    list(z.named_steps['classifier'].classes_) for z in
+                    classifiers
+                ]
+                assert classes[0] == labels
+                num_classifiers = len(classifiers)
+
+                pp = []
+                for nidx in range(num_classifiers):
+                    vect = get_vects(name, [nidx], unique=unique)
+                    pr = classifiers[nidx].predict_proba(vect)
+                    pr2 = pr * weights[nidx]
+                    pp.append(pr2)
+                pred = preds[i]
+                for p in pp:
+                    if pred is None:
+                        pred = p
+                    else:
+                        pred += p
+                pred /= float(num_classifiers)
+                preds[i] = pred
+
+            preds = np.mean(preds, axis=0)
+
+            if name == 'submission':
+                if all_preds is None:
+                    all_preds = preds
+                else:
+                    all_preds = np.concatenate([all_preds, preds], axis=1)
+            else:
+                actuals = []
+                for cidx in range(preds.shape[0]):
+                    label = ty[cidx]
+                    tmp = np.zeros(len(classes[0]))
+                    tmp[classes[0].index(label)] = 1.0
+                    label = tmp
+                    actuals.append(label)
+
+                mmll = scoring.multi_multi_log_loss(
+                    np.array(preds),
+                    np.array(actuals),
+                    np.array([range(actuals[0].shape[0])])
+                )
+                print('mmll: {:.4f}'.format(mmll))
+
+    if all_preds is not None:
+        header = ['__'.join(i) for i in FLAT_LABELS]
+        headers = []
+        for i in header:
+            if ' ' in i:
+                i = '"{}"'.format(i)
+            headers.append(i)
+
+        header_line = ',' + ','.join(headers)
+        print(header_line)
+        fname = dirname(dirname(__file__)) + '/data/submission/blend.csv'
+        with open(fname, 'w') as ifile:
+            ifile.write(header_line + '\n')
+            for idx, (data, label) in enumerate(ugen_submission(unique)):
+                row = '{},{}'.format(
+                    data.id,
+                    ','.join(['{:.12f}'.format(n) for n in all_preds[idx]])
+                )
+                if idx < 10:
+                    print(row)
+                ifile.write(row + '\n')
+
+
 if __name__ == '__main__':
     # run()
     # log_reg_tuning(False)
     # naive_bayes_tuning(False)
     # rf_tuning(False)
-    avg_perc_tuning(False)
+    # avg_perc_tuning(False)
 
     # ada_rf_tuning(False)
     # gradient_boosting_tuning(False)
 
-    # weighted_average()
+    # weighted_average(create_file=True)
+    weighted_average_pred('submission', False)
