@@ -19,11 +19,12 @@ class RBM(object):
     def __init__(
         self,
         input=None,
-        n_visible=784,
+        n_in=784,
         n_hidden=500,
         W=None,
         hbias=None,
         vbias=None,
+        lmbda=0.1,
         numpy_rng=None,
         theano_rng=None
     ):
@@ -35,7 +36,7 @@ class RBM(object):
         :param input: None for standalone RBMs or symbolic variable if RBM is
         part of a larger graph.
 
-        :param n_visible: number of visible units
+        :param n_in: number of visible units
 
         :param n_hidden: number of hidden units
 
@@ -51,8 +52,9 @@ class RBM(object):
         pointing to a shared visible units bias
         """
 
-        self.n_visible = n_visible
+        self.n_visible = n_in
         self.n_hidden = n_hidden
+        self.lmbda = lmbda
 
         if numpy_rng is None:
             # create a number generator
@@ -74,9 +76,14 @@ class RBM(object):
             # that the code is runable on GPU
             initial_W = numpy.asarray(
                 self.numpy_rng.uniform(
-                    low=-4 * numpy.sqrt(6. / (n_hidden + n_visible)),
-                    high=4 * numpy.sqrt(6. / (n_hidden + n_visible)),
-                    size=(n_visible, n_hidden)
+                    # TODO figure out initial weights
+                    # low=-.01,
+                    # high=.01,
+                    # low=-1./numpy.sqrt(n_in),
+                    # high=1./numpy.sqrt(n_in),
+                    low=-4 * numpy.sqrt(6. / (n_hidden + n_in)),
+                    high=4 * numpy.sqrt(6. / (n_hidden + n_in)),
+                    size=(n_in, n_hidden)
                 ),
                 dtype=theano.config.floatX
             )
@@ -98,7 +105,7 @@ class RBM(object):
             # create shared variable for visible units bias
             vbias = theano.shared(
                 value=numpy.zeros(
-                    n_visible,
+                    n_in,
                     dtype=theano.config.floatX
                 ),
                 name='vbias',
@@ -340,13 +347,18 @@ class RBM(object):
         that Theano can catch and optimize the expression.
 
         """
+        y = self.input
+        a = T.nnet.sigmoid(pre_sigmoid_nv)
 
         cross_entropy = T.mean(
-            T.sum(
-                self.input * T.log(T.nnet.sigmoid(pre_sigmoid_nv)) +
-                (1 - self.input) * T.log(1 - T.nnet.sigmoid(pre_sigmoid_nv)),
-                axis=1
-            )
+            T.sum(y * T.log(a) + (1 - y) * T.log(1 - a), axis=1)
         )
 
-        return cross_entropy
+        regularization = (self.lmbda / 2.) * T.mean(
+            T.sum(T.sqr(self.W), axis=1)
+        )
+
+        regularized_cross_entropy = cross_entropy + regularization
+
+        return regularized_cross_entropy
+        # return cross_entropy

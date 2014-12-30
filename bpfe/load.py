@@ -163,6 +163,17 @@ def _gen_name(name, num_chunks, batch_size=None):
             yield data
 
 
+def ugen_all(unique=True):
+    for data in ugen_validate(unique):
+        yield data
+    for data in ugen_test(unique):
+        yield data
+    for data in ugen_train(unique):
+        yield data
+    for data in ugen_submission(unique):
+        yield data
+
+
 def ugen_validate(unique=True):
     for data in _ugen_name('validate'):
         yield data

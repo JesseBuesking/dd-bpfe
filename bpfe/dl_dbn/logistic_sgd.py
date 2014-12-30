@@ -51,7 +51,7 @@ class LogisticRegression(object):
     determine a class membership probability.
     """
 
-    def __init__(self, input_vector, n_in, n_out):
+    def __init__(self, input_vector, n_in, n_out, lmbda, numpy_rng):
         """ Initialize the parameters of the logistic regression
 
         :type input_vector: theano.tensor.TensorType
@@ -75,6 +75,15 @@ class LogisticRegression(object):
                 (n_in, n_out),
                 dtype=theano.config.floatX
             ),
+            # TODO figure out initial weights
+            # value=numpy.asarray(
+            #     numpy_rng.uniform(
+            #         low=-1./numpy.sqrt(n_in),
+            #         high=1./numpy.sqrt(n_in),
+            #         size=(n_in, n_hidden),
+            #     ),
+            #     dtype=theano.config.floatX
+            # ),
             name='W',
             borrow=True
         )
@@ -119,6 +128,7 @@ class LogisticRegression(object):
 
         # parameters of the model
         self.params = [self.W, self.b]
+        self.lmbda = lmbda
 
     def negative_log_likelihood(self, y):
         """Return the mean of the negative log-likelihood of the prediction
@@ -164,41 +174,28 @@ class LogisticRegression(object):
 
         # end-snippet-2
 
-    def errors(self, y):
-        """Return a float representing the number of errors in the minibatch
-        over the total number of examples of the minibatch ; zero one
-        loss over the size of the minibatch
+    def bpfe_log_loss(self, y):
+        debug = False
+        log_preds = T.log(self.p_y_given_x)
+        if debug:
+            log_preds = theano.printing.Print('log_preds')(log_preds)
+        if debug:
+            y = theano.printing.Print('y')(y)
+        sum_logs = T.sum(y * log_preds)
+        if debug:
+            sum_logs = theano.printing.Print('sum_logs')(sum_logs)
+        log_loss = (-1.0 / y.shape[0]) * sum_logs
+        if debug:
+            log_loss = theano.printing.Print('log_loss')(log_loss)
 
-        :type y: theano.tensor.TensorType
-        :param y: corresponds to a vector that gives for each example the
-         correct label
-        """
+        regularization = (self.lmbda / 2.) * T.mean(
+            T.sum(T.sqr(self.W), axis=1)
+        )
 
-        # check if y has same dimension of y_pred
-        if y.ndim != self.y_pred.ndim:
-        # noinspection PyUnresolvedReferences
-            raise TypeError(
-                'y should have the same shape as self.y_pred',
-                ('y', y.type, 'y_pred', self.y_pred.type)
-            )
+        regularized_log_loss = log_loss + regularization
 
-        # check if y is of the correct data type
-        if y.dtype.startswith('int'):
-            # the T.neq operator returns a vector of 0s and 1s, where 1
-            # represents a mistake in prediction
-            if False:
-                y_pred_printed = theano.printing.Print('y_pred')(self.y_pred)
-                y_printed = theano.printing.Print('y')(y)
-                neq_printed = theano.printing.Print('neq')(T.neq(
-                    y_pred_printed, y_printed
-                ))
-                mean_printed = theano.printing.Print('mean')(T.mean(
-                    neq_printed))
-                return mean_printed
-            else:
-                return T.mean(T.neq(self.y_pred, y))
-        else:
-            raise NotImplementedError()
+        return regularized_log_loss
+        # return log_loss
 
     def predict_proba(self):
         return self.p_y_given_x

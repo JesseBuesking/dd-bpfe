@@ -644,4 +644,4 @@ class Settings(object):
 
 class StatsSettings(object):
 
-    fname = 'data/settings_stats.pkl'
+    fname = 'data/settings_stats_v10.pkl'

@@ -3,6 +3,7 @@
 import math
 
 import numpy
+from scipy.sparse import csr_matrix
 
 import theano
 import theano.tensor as T
@@ -13,7 +14,7 @@ from rbm import RBM
 
 # start-snippet-1
 class HiddenLayer(object):
-    def __init__(self, rng, layer_input, n_in, n_out, W=None, b=None,
+    def __init__(self, numpy_rng, layer_input, n_in, n_out, W=None, b=None,
                  activation=T.tanh):
         """
         Typical hidden layer of a MLP: units are fully-connected and have
@@ -24,8 +25,8 @@ class HiddenLayer(object):
 
         Hidden unit activation is given by: tanh(dot(input,W) + b)
 
-        :type rng: numpy.random.RandomState
-        :param rng: a random number generator used to initialize weights
+        :type numpy_rng: numpy.random.RandomState
+        :param numpy_rng: a random number generator used to initialize weights
 
         :type layer_input: theano.tensor.dmatrix
         :param layer_input: a symbolic tensor of shape (n_examples, n_in)
@@ -57,7 +58,10 @@ class HiddenLayer(object):
         if W is None:
             # noinspection PyUnresolvedReferences
             W_values = numpy.asarray(
-                rng.uniform(
+                numpy_rng.uniform(
+                    # TODO figure out initial weights
+                    # low=-1./numpy.sqrt(n_in),
+                    # high=-1./numpy.sqrt(n_in),
                     low=-numpy.sqrt(6. / (n_in + n_out)),
                     high=numpy.sqrt(6. / (n_in + n_out)),
                     size=(n_in, n_out)
@@ -127,8 +131,8 @@ class DBN(object):
         # allocate symbolic variables for the data
         # the data is presented as rasterized images
         self.x = T.matrix('x')
-        # the labels are presented as 1D vector of [int] labels
-        self.y = T.ivector('y')
+        # the labels are a matrix
+        self.y = T.matrix('y')
 
         # end-snippet-1
         # The DBN is an MLP, for which all weights of intermediate
@@ -141,7 +145,8 @@ class DBN(object):
         # training the DBN by doing stochastic gradient descent on the
         # MLP.
 
-    def create_hidden_layer(self, layer_num, numpy_rng, theano_rng):
+    def create_hidden_layer(self, layer_num, numpy_rng, theano_rng,
+                            train_size):
         # construct the sigmoidal layer
         # the size of the input is either the number of hidden
         # units of the layer below or the input size if we are on
@@ -160,7 +165,7 @@ class DBN(object):
             layer_input = self.sigmoid_layers[-1].output
 
         sigmoid_layer = HiddenLayer(
-            rng=numpy_rng,
+            numpy_rng=numpy_rng,
             layer_input=layer_input,
             n_in=input_size,
             n_out=self.hidden_layer_sizes[layer_num],
@@ -182,35 +187,39 @@ class DBN(object):
             numpy_rng=numpy_rng,
             theano_rng=theano_rng,
             input=layer_input,
-            n_visible=input_size,
+            n_in=input_size,
             n_hidden=self.hidden_layer_sizes[layer_num],
             W=sigmoid_layer.W,
-            hbias=sigmoid_layer.b
+            hbias=sigmoid_layer.b,
+            # seems reasonable
+            lmbda=train_size / 1000.
         )
         self.rbm_layers.append(rbm_layer)
 
         return rbm_layer
 
-    def create_output_layer(self):
+    def create_output_layer(self, train_size, numpy_rng):
         # We now need to add a logistic layer on top of the MLP
         self.logLayer = LogisticRegression(
             input_vector=self.sigmoid_layers[-1].output,
             n_in=self.hidden_layer_sizes[-1],
-            n_out=self.number_of_outputs
+            n_out=self.number_of_outputs,
+            lmbda=train_size / 1000.,
+            numpy_rng=numpy_rng
         )
         self.params.extend(self.logLayer.params)
 
         # compute the cost for second phase of training, defined as the
         # negative log likelihood of the logistic regression (output) layer
-        self.finetune_cost = self.logLayer.negative_log_likelihood(self.y)
-
-        # compute the gradients with respect to the model parameters
-        # symbolic variable that points to the number of errors made on the
-        # minibatch given by self.x and self.y
-        self.errors = self.logLayer.errors(self.y)
+        self.finetune_cost = self.logLayer.bpfe_log_loss(self.y)
+        #
+        # # compute the gradients with respect to the model parameters
+        # # symbolic variable that points to the number of errors made on the
+        # # minibatch given by self.x and self.y
+        # self.errors = self.logLayer.errors(self.y)
 
     def pretraining_function(self, train_set_x, batch_size, k, layer_num,
-                             numpy_rng, theano_rng, load=False):
+                             numpy_rng, theano_rng, train_size, load=False):
         """Generates a list of functions, for performing one step of
         gradient descent at a given layer. The function will require
         as input the minibatch index, and to train an RBM you just
@@ -238,7 +247,8 @@ class DBN(object):
         if load:
             rbm = self.rbm_layers[layer_num]
         else:
-            rbm = self.create_hidden_layer(layer_num, numpy_rng, theano_rng)
+            rbm = self.create_hidden_layer(
+                layer_num, numpy_rng, theano_rng, train_size)
 
             # get the cost and the updates list
             # using CD-k here (persistent=None) for training each RBM.
@@ -254,7 +264,32 @@ class DBN(object):
                 self.x: train_set_x[batch_begin:batch_end]
             }
         )
-        return fn
+
+        def recursive(X, total_layers, current_layer):
+            if current_layer != 0:
+                X = recursive(
+                    X,
+                    total_layers,
+                    current_layer-1
+                )
+
+            if total_layers == current_layer:
+                return X
+            else:
+                v = self.rbm_layers[current_layer].sample_h_given_v(X)[2]
+                return v
+
+        free_energy = theano.function(
+            inputs=[],
+            outputs=self.rbm_layers[-1].free_energy(
+                recursive(self.x, layer_num, layer_num)
+            ),
+            givens={
+                self.x: train_set_x
+            }
+        )
+
+        return fn, free_energy
 
     def build_finetune_functions(self, datasets, batch_size, learning_rate):
         """Generates a function `train` that implements one step of
@@ -298,48 +333,9 @@ class DBN(object):
                 self.x: train_set_x[
                     index * batch_size: (index + 1) * batch_size
                 ],
-                self.y: T.cast(train_set_y[
+                self.y: train_set_y[
                     index * batch_size: (index + 1) * batch_size
-                ], 'int32')
-            }
-        )
-
-        train_score_i = theano.function(
-            [index],
-            self.errors,
-            givens={
-                self.x: train_set_x[
-                    index * batch_size: (index + 1) * batch_size
-                ],
-                self.y: T.cast(train_set_y[
-                    index * batch_size: (index + 1) * batch_size
-                ], 'int32')
-            }
-        )
-
-        test_score_i = theano.function(
-            [index],
-            self.errors,
-            givens={
-                self.x: test_set_x[
-                    index * batch_size: (index + 1) * batch_size
-                ],
-                self.y: T.cast(test_set_y[
-                    index * batch_size: (index + 1) * batch_size
-                ], 'int32')
-            }
-        )
-
-        valid_score_i = theano.function(
-            [index],
-            self.errors,
-            givens={
-                self.x: valid_set_x[
-                    index * batch_size: (index + 1) * batch_size
-                ],
-                self.y: T.cast(valid_set_y[
-                    index * batch_size: (index + 1) * batch_size
-                ], 'int32')
+                ]
             }
         )
 
@@ -348,6 +344,16 @@ class DBN(object):
             self.logLayer.predict_proba(),
             givens={
                 self.x: train_set_x[
+                    index * batch_size: (index + 1) * batch_size
+                ]
+            }
+        )
+
+        valid_predict_proba_i = theano.function(
+            [index],
+            self.logLayer.predict_proba(),
+            givens={
+                self.x: valid_set_x[
                     index * batch_size: (index + 1) * batch_size
                 ]
             }
@@ -373,32 +379,13 @@ class DBN(object):
             }
         )
 
-        #### SCORING FUNCTIONS
-
-        # Create a function that scans the entire train set
-        def train_score(gen):
-            return score(gen, train_set_x, train_score_i)
-
-        # Create a function that scans the entire validation set
-        def valid_score(gen):
-            return score(gen, valid_set_x, valid_score_i)
-
-        # Create a function that scans the entire test set
-        def test_score(gen):
-            return score(gen, test_set_x, test_score_i)
-
-        def score(gen, X, score_i):
-            scores = []
-            for _ in gen:
-                batches = X.get_value(borrow=True).shape[0]
-                batches = int(math.ceil(batches / float(batch_size)))
-                scores += [score_i(i) for i in xrange(batches)]
-            return scores
-
         #### PREDICTION PROBABILITY FUNCTIONS
 
         def train_preds(gen):
             return pred(gen, train_set_x, train_predict_proba_i)
+
+        def valid_preds(gen):
+            return pred(gen, valid_set_x, valid_predict_proba_i)
 
         def test_preds(gen):
             return pred(gen, test_set_x, test_predict_proba_i)
@@ -406,20 +393,34 @@ class DBN(object):
         def submission_preds(gen):
             return pred(gen, submission_set_x, submission_predict_proba_i)
 
-        def pred(gen, X, predict_proba_i):
+        def pred(data, X, predict_proba_i):
             predict_probas = None
-            for _ in gen:
-                batches = X.get_value(borrow=True).shape[0]
-                batches = int(math.ceil(batches / float(batch_size)))
-                for i in xrange(batches):
+            to_gpu_size = 5000
+            to_gpu_batches = int(
+                math.ceil(data.shape[0] / float(to_gpu_size))
+            )
+            for to_gpu_batch in range(to_gpu_batches):
+                start = (to_gpu_batch * to_gpu_size)
+                end = min(start + to_gpu_size, data.shape[0])
+                # noinspection PyUnresolvedReferences
+                subset_data = csr_matrix(
+                    data[start:end],
+                    dtype=theano.config.floatX
+                )
+                subset_data = subset_data.todense()
+                X.set_value(subset_data, borrow=True)
+
+                n_batches = int(
+                    math.ceil(subset_data.shape[0] / float(10))
+                )
+                for batch_index in xrange(n_batches):
                     if predict_probas is None:
-                        predict_probas = predict_proba_i(i)
+                        predict_probas = predict_proba_i(batch_index)
                     else:
                         predict_probas = numpy.concatenate(
-                            (predict_probas, predict_proba_i(i)),
+                            (predict_probas, predict_proba_i(batch_index)),
                             axis=0
                         )
             return predict_probas
 
-        return train_fn, train_score, valid_score, test_score, \
-            train_preds, test_preds, submission_preds
+        return train_fn, train_preds, valid_preds, test_preds, submission_preds

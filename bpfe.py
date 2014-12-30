@@ -942,7 +942,7 @@ def predict_submission(datasets, settings, klass, klass_num):
 if __name__ == '__main__':
     # predict()
     # predict_train()
-    # DBN_tuning()
+    DBN_tuning()
     # DBN_run()
-    run()
+    # run()
     # stats()
