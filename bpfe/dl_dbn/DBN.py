@@ -134,6 +134,12 @@ class DBN(object):
         # the labels are a matrix
         self.y = T.matrix('y')
 
+        # track momentums
+        self.Ms = []
+
+        # track rmsprop
+        self.MSs = []
+
         # end-snippet-1
         # The DBN is an MLP, for which all weights of intermediate
         # layers are shared with a different RBM.  We will first
@@ -253,11 +259,11 @@ class DBN(object):
             # get the cost and the updates list
             # using CD-k here (persistent=None) for training each RBM.
             # TODO: change cost function to reconstruction error
-            rbm.get_cost_updates(learning_rate, persistent=None, k=k)
+            rbm.get_cost_updates(learning_rate, k=k)
 
         # compile the theano function
         fn = theano.function(
-            inputs=[index, rbm.learning_rate],
+            inputs=[index],
             outputs=rbm.monitoring_cost,
             updates=rbm.updates,
             givens={
@@ -291,7 +297,8 @@ class DBN(object):
 
         return fn, free_energy
 
-    def build_finetune_functions(self, datasets, batch_size, learning_rate):
+    def build_finetune_functions(self, datasets, batch_size, learning_rate,
+                                 momentum=0.9):
         """Generates a function `train` that implements one step of
         finetuning, a function `validate` that computes the error on a
         batch from the validation set, and a function `test` that
@@ -317,13 +324,107 @@ class DBN(object):
 
         index = T.lscalar('index')  # index to a [mini]batch
 
-        # compute the gradients with respect to the model parameters
-        gparams = T.grad(self.finetune_cost, self.params)
+        # noinspection PyUnresolvedReferences
+        learning_rate = T.cast(0.1, dtype=theano.config.floatX)
+
+        def momentumed(pidx, param, momentum):
+            # We must not compute the gradient through the gibbs sampling
+
+            if len(self.Ms) < pidx + 1:
+                # initialize momentum for this element to zeros
+                self.Ms.append(theano.shared(
+                    param.get_value() * 0.,
+                    broadcastable=param.broadcastable
+                ))
+
+            M_update = self.Ms[pidx]
+
+            grad = T.grad(self.finetune_cost, param)
+
+            # noinspection PyUnresolvedReferences
+            momentum = T.cast(momentum, dtype=theano.config.floatX)
+
+            v_prime = momentum * M_update - learning_rate * grad
+            w_prime = param + v_prime
+            updates.append((M_update, v_prime))
+            updates.append((param, w_prime))
 
         # compute list of fine-tuning updates
         updates = []
-        for param, gparam in zip(self.params, gparams):
-            updates.append((param, param - gparam * learning_rate))
+        for pidx, param in enumerate(self.params):
+            # # regular
+            # grad = T.grad(self.finetune_cost, param)
+            # updates.append((param, param - (learning_rate * grad)))
+
+            momentumed(pidx, param, momentum)
+
+            # # if len(self.MSs) < pidx + 1:
+            # #     # initialize momentum for this element to zeros
+            # #     # noinspection PyUnresolvedReferences
+            # #     # self.MSs.append(theano.shared(1.))
+            # #     self.MSs.append(theano.shared(
+            # #         (param.get_value() * 0.) + 1,
+            # #         broadcastable=param.broadcastable
+            # #     ))
+            # #
+            # # MS_update = self.MSs[pidx]
+            # #
+            # grad = T.grad(self.finetune_cost, param)
+            # #
+            # # # noinspection PyUnresolvedReferences
+            # # current_rmsprop = T.cast(
+            # #     T.minimum(
+            # #         T.maximum(
+            # #             (0.9 * MS_update) + (0.1 * T.sqr(grad)),
+            # #             1e-8
+            # #         ),
+            # #         1. - 1e-8
+            # #     ),
+            # #     dtype=theano.config.floatX
+            # # )
+            # #
+            # # updates.append((MS_update, current_rmsprop))
+            # # # current_rmsprop = theano.printing.Print('crms')(current_rmsprop)
+            # #
+            # # # noinspection PyUnresolvedReferences
+            # # learning_rate = T.sqrt(current_rmsprop)
+            # # # learning_rate = theano.printing.Print('lr')(learning_rate)
+            #
+            # # original
+            # updates.append((param, param - (learning_rate * grad)))
+            #
+            # # # TODO REMOVE ME
+            # # try:
+            # #     blah = self.Ms
+            # # except AttributeError:
+            # #     self.Ms = []
+            # # if len(self.Ms) < pidx + 1:
+            # #     # initialize momentum for this element to zeros
+            # #     self.Ms.append(theano.shared(
+            # #         param.get_value() * 0.,
+            # #         broadcastable=param.broadcastable
+            # #     ))
+            # #
+            # # param_update = self.Ms[pidx]
+            # #
+            # # # make sure that the learning rate is of the right dtype
+            # # # noinspection PyUnresolvedReferences
+            # # learning_rate = T.cast(learning_rate, dtype=theano.config.floatX)
+            # # # noinspection PyUnresolvedReferences
+            # # momentum = T.cast(momentum, dtype=theano.config.floatX)
+            # #
+            # # current_cost = learning_rate * param_update
+            # # updates.append((
+            # #     param,
+            # #     # theano.printing.Print('pc')(param - current_cost)
+            # #     (param - current_cost)
+            # # ))
+            # #
+            # # updates.append((
+            # #     param_update,
+            # #     # theano.printing.Print('mpg')(mom + grad)
+            # #     (momentum * param_update) + grad
+            # # ))
 
         train_fn = theano.function(
             inputs=[index],
@@ -336,7 +437,8 @@ class DBN(object):
                 self.y: train_set_y[
                     index * batch_size: (index + 1) * batch_size
                 ]
-            }
+            },
+            # mode=theano.compile.debugmode.DebugMode(check_isfinite=True)
         )
 
         train_predict_proba_i = theano.function(

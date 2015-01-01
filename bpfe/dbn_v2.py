@@ -268,29 +268,29 @@ def DBN_tuning(percent):
     settings.k = 1
     settings.hidden_layers = [
         HiddenLayerSettings(
-            1000,
-            300,
+            500,
+            9,
             ptlr
         ),
         HiddenLayerSettings(
             500,
-            300,
+            9,
             ptlr
         ),
         HiddenLayerSettings(
-            250,
-            300,
+            500,
+            9,
             ptlr
         ),
-        HiddenLayerSettings(
-            100,
-            300,
-            ptlr
-        )
+        # HiddenLayerSettings(
+        #     100,
+        #     300,
+        #     ptlr
+        # )
     ]
     settings.batch_size = 10
     settings.finetuning = FinetuningSettings(
-        2,
+        100,
         ftlr
     )
     settings.chunks = ChunkSettings(1, 1, 1, None)
@@ -348,8 +348,9 @@ def DBN_run(percent):
 
 
 def _run_with_params(settings, percent):
-    dbn, datasets = pretrain(settings, percent)
-    finetune(dbn, datasets, settings, percent)
+    for klass, (klass_num, count) in KLASS_LABEL_INFO.items():
+        dbn, datasets = pretrain(settings, percent)
+        finetune(dbn, datasets, settings, percent, klass, klass_num, count)
 
 
 def pretrain(settings, percent):
@@ -465,8 +466,7 @@ def pretrain(settings, percent):
                 )
                 for batch_index in xrange(n_train_batches):
                     c.append(pretraining_fn(
-                        index=batch_index,
-                        lr=settings.hidden_layers[layer_idx].learning_rate
+                        index=batch_index
                     ))
                 del subset
 
@@ -529,9 +529,9 @@ def pretrain(settings, percent):
             with gzip.open(errname, 'wb') as ifile:
                 pickle.dump(errors, ifile, -1)
 
-            if (epoch % 5 == 0 and epoch != 0) or \
-               epoch == settings.hidden_layers[layer_idx].epochs - 1:
-                cache.save_pretrain_layer(dbn, layer_idx, settings, epoch)
+            # if (epoch % 20 == 0 and epoch != 0) or \
+            #    epoch == settings.hidden_layers[layer_idx].epochs - 1:
+            #     cache.save_pretrain_layer(dbn, layer_idx, settings, epoch)
 
     end_time = time.clock()
     # end-snippet-2
@@ -545,24 +545,11 @@ def pretrain(settings, percent):
     return dbn, datasets
 
 
-def finetune(dbn, datasets, settings, percent):
-    # TODO since we're running a single class....
-    with open('data/current-dbn.pkl', 'wb') as ifile:
-        pickle.dump(dbn, ifile)
+def finetune(dbn, datasets, settings, percent, klass, klass_num, count):
+    dbn.number_of_outputs = count
+    finetune_class(dbn, datasets, settings, klass, klass_num, count, percent)
 
-    for klass, (klass_num, count) in KLASS_LABEL_INFO.items():
-        # if klass in {'Function'}:
-        #     continue
-
-        dbn.number_of_outputs = count
-        finetune_class(
-            dbn, datasets, settings, klass, klass_num, count, percent)
-
-        # try_predict_test(datasets, settings, klass, klass_num)
-
-        # TODO since we're running a single class....
-        with open('data/current-dbn.pkl', 'rb') as ifile:
-            dbn = pickle.load(ifile)
+    # try_predict_test(datasets, settings, klass, klass_num)
 
 
 def finetune_class(dbn, datasets, settings, klass, klass_num, count, percent):
@@ -676,7 +663,7 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count, percent):
 
         val_mmll = get_mmll('validate')
 
-        if epoch % 5 == 0:
+        if epoch % 20 == 0 and epoch != 0:
             cache.save_finetuning(dbn, settings, klass_num, epoch)
 
         # if we got the best validation score until now
@@ -686,8 +673,18 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count, percent):
             settings.finetuning[klass_num].best_iteration = epoch
 
         train_mmll = get_mmll('train')
+
+        scorename = data_dir + '/ft-{}-{:.2f}.pkl.gz'.format(
+            LABEL_MAPPING[klass], percent
+        )
+        scores = []
+        if os.path.exists(scorename):
+            with gzip.open(scorename, 'rb') as ifile:
+                scores = pickle.load(ifile)
         scores.append([epoch, train_mmll, 'train'])
         scores.append([epoch, val_mmll, 'validate'])
+        with gzip.open(scorename, 'wb') as ifile:
+            pickle.dump(scores, ifile, -1)
 
         print(
             'epoch {}: train mmll {:.4f}, validate mmll {:.4f} after {}'
@@ -699,11 +696,6 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count, percent):
             )
         )
 
-    scorename = data_dir + '/ft-{}-{:.2f}.pkl.gz'.format(
-        LABEL_MAPPING[klass], percent
-    )
-    with gzip.open(scorename, 'wb') as ifile:
-        pickle.dump(scores, ifile, -1)
     df = pd.DataFrame(scores, columns=['epoch', 'error', 'dataset'])
     sns.pointplot('epoch', 'error', data=df, hue='dataset')
     plt.title('error for hl epochs {}, ft epochs {}, {:.1f}%'.format(

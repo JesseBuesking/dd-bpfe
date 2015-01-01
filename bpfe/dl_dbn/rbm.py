@@ -25,6 +25,8 @@ class RBM(object):
         hbias=None,
         vbias=None,
         lmbda=0.1,
+        momentum=0.9,
+        weight_decay_cost=0.001,
         numpy_rng=None,
         theano_rng=None
     ):
@@ -55,6 +57,7 @@ class RBM(object):
         self.n_visible = n_in
         self.n_hidden = n_hidden
         self.lmbda = lmbda
+        self.weight_decay_cost = weight_decay_cost
 
         if numpy_rng is None:
             # create a number generator
@@ -89,6 +92,14 @@ class RBM(object):
             )
             # theano shared variables for weights and biases
             W = theano.shared(value=initial_W, name='W', borrow=True)
+
+        # track momentums
+        self.Ms = []
+
+        # track mean squareds
+        self.MSs = []
+
+        self.momentum = momentum
 
         if hbias is None:
             # create shared variable for hidden units bias
@@ -204,15 +215,10 @@ class RBM(object):
                 pre_sigmoid_v1, v1_mean, v1_sample]
 
     # start-snippet-2
-    def get_cost_updates(self, lr=0.1, persistent=None, k=1):
+    def get_cost_updates(self, lr=0.1, k=1):
         """This functions implements one step of CD-k or PCD-k
 
         :param lr: learning rate used to train the RBM
-
-        :param persistent: None for CD. For PCD, shared variable
-            containing old state of Gibbs chain. This must be a shared
-            variable of size (batch size, number of hidden units).
-
         :param k: number of Gibbs steps to do in CD-k/PCD-k
 
         Returns a proxy for the cost and the updates dictionary. The
@@ -227,11 +233,7 @@ class RBM(object):
 
         # decide how to initialize persistent chain:
         # for CD, we use the newly generate hidden sample
-        # for PCD, we initialize from the old state of the chain
-        if persistent is None:
-            chain_start = ph_sample
-        else:
-            chain_start = persistent
+        chain_start = ph_sample
         # end-snippet-2
         # perform actual negative phase
         # in order to implement CD-k/PCD-k we need to scan over the
@@ -264,59 +266,94 @@ class RBM(object):
 
         cost = T.mean(self.free_energy(self.input)) - T.mean(
             self.free_energy(chain_end))
-        # We must not compute the gradient through the gibbs sampling
-        gparams = T.grad(cost, self.params, consider_constant=[chain_end])
+
+        # noinspection PyUnresolvedReferences
+        learning_rate = T.cast(0.01, dtype=theano.config.floatX)
+
+        def momentumed(pidx, param):
+            if len(self.Ms) < pidx + 1:
+                # initialize momentum for this element to zeros
+                self.Ms.append(theano.shared(
+                    param.get_value() * 0.,
+                    broadcastable=param.broadcastable
+                ))
+
+            M_update = self.Ms[pidx]
+
+            grad = T.grad(cost, param, consider_constant=[chain_end])
+
+            # noinspection PyUnresolvedReferences
+            momentum = T.cast(self.momentum, dtype=theano.config.floatX)
+
+            v_prime = momentum * M_update - learning_rate * grad
+            w_prime = param + v_prime
+            updates[M_update] = v_prime
+            updates[param] = w_prime
+
         # end-snippet-3 start-snippet-4
         # constructs the update dictionary
-        for gparam, param in zip(gparams, self.params):
-            # make sure that the learning rate is of the right dtype
-            updates[param] = param - gparam * T.cast(
-                lr,
-                dtype=theano.config.floatX
-            )
-        if persistent:
-            # Note that this works only if persistent is a shared variable
-            updates[persistent] = nh_samples[-1]
-            # pseudo-likelihood is a better proxy for PCD
-            monitoring_cost = self.get_pseudo_likelihood_cost(updates)
-        else:
-            # reconstruction cross-entropy is a better proxy for CD
-            monitoring_cost = self.get_reconstruction_cost(updates,
-                                                           pre_sigmoid_nvs[-1])
+        for pidx, param in enumerate(self.params):
+            # # We must not compute the gradient through the gibbs sampling
+            # grad = T.grad(cost, param, consider_constant=[chain_end])
+            # current_cost = learning_rate * grad
+            # updates[param] = param - current_cost
+
+            momentumed(pidx, param)
+
+            # if len(self.Ms) < pidx + 1:
+            #     # initialize momentum for this element to zeros
+            #     self.Ms.append(theano.shared(
+            #         param.get_value() * 0.,
+            #         broadcastable=param.broadcastable
+            #     ))
+            #
+            # # if len(self.MSs) < pidx + 1:
+            # #     # initialize momentum for this element to zeros
+            # #     # noinspection PyUnresolvedReferences
+            # #     # self.MSs.append(theano.shared(1.))
+            # #     self.MSs.append(theano.shared(
+            # #         (param.get_value() * 0.) + 1,
+            # #         broadcastable=param.broadcastable
+            # #     ))
+            #
+            # M_update = self.Ms[pidx]
+            # # MS_update = self.MSs[pidx]
+            #
+            # grad = T.grad(cost, param, consider_constant=[chain_end])
+            #
+            # # current_rmsprop = (0.9 * MS_update) + (0.1 * T.sqr(grad))
+            #
+            # # current_rmsprop = (0.9 * MS_update) + \
+            # #                   (0.1 * T.mean(T.sqr(grad)))
+            #
+            # # updates[MS_update] = current_rmsprop
+            #
+            # # noinspection PyUnresolvedReferences
+            # momentum = T.cast(self.momentum, dtype=theano.config.floatX)
+            #
+            # # # noinspection PyUnresolvedReferences
+            # # learning_rate = T.sqrt(
+            # #     T.cast(current_rmsprop, dtype=theano.config.floatX)
+            # # )
+            # learning_rate = 0.1
+            # # learning_rate = theano.printing.Print('lr')(learning_rate)
+            #
+            # current_cost = learning_rate * grad
+            # updates[param] = param - current_cost
+            # # updates[param] = param - (learning_rate * grad)
+            #
+            # updates[M_update] = momentum * M_update + current_cost
+
+        # reconstruction cross-entropy is a better proxy for CD
+        monitoring_cost = self.get_reconstruction_cost(
+            updates,
+            pre_sigmoid_nvs[-1]
+        )
 
         self.monitoring_cost = monitoring_cost
         self.updates = updates
         self.learning_rate = lr
         # end-snippet-4
-
-    def get_pseudo_likelihood_cost(self, updates):
-        """Stochastic approximation to the pseudo-likelihood"""
-
-        # index of bit i in expression p(x_i | x_{\i})
-        bit_i_idx = theano.shared(value=0, name='bit_i_idx')
-
-        # binarize the input image by rounding to nearest integer
-        xi = T.round(self.input)
-
-        # calculate free energy for the given bit configuration
-        fe_xi = self.free_energy(xi)
-
-        # flip bit x_i of matrix xi and preserve all other bits x_{\i}
-        # Equivalent to xi[:,bit_i_idx] = 1-xi[:, bit_i_idx], but assigns
-        # the result to xi_flip, instead of working in place on xi.
-        xi_flip = T.set_subtensor(xi[:, bit_i_idx], 1 - xi[:, bit_i_idx])
-
-        # calculate free energy with bit flipped
-        fe_xi_flip = self.free_energy(xi_flip)
-
-        # equivalent to e^(-FE(x_i)) / (e^(-FE(x_i)) + e^(-FE(x_{\i})))
-        cost = T.mean(self.n_visible * T.log(T.nnet.sigmoid(fe_xi_flip -
-                                                            fe_xi)))
-
-        # increment bit_i_idx % number as part of updates
-        updates[bit_i_idx] = (bit_i_idx + 1) % self.n_visible
-
-        return cost
 
     def get_reconstruction_cost(self, updates, pre_sigmoid_nv):
         """Approximation to the reconstruction error
@@ -354,11 +391,12 @@ class RBM(object):
             T.sum(y * T.log(a) + (1 - y) * T.log(1 - a), axis=1)
         )
 
-        regularization = (self.lmbda / 2.) * T.mean(
-            T.sum(T.sqr(self.W), axis=1)
-        )
+        n = y.shape[0]
+
+        regularization = \
+            (self.lmbda / (2. * n)) * \
+            (self.weight_decay_cost * T.sum(T.sqr(self.W)))
 
         regularized_cross_entropy = cross_entropy + regularization
 
         return regularized_cross_entropy
-        # return cross_entropy

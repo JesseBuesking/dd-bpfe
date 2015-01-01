@@ -176,26 +176,40 @@ class LogisticRegression(object):
 
     def bpfe_log_loss(self, y):
         debug = False
-        log_preds = T.log(self.p_y_given_x)
+
+        # softmax activations (summing to 1)
+        a = self.p_y_given_x
         if debug:
-            log_preds = theano.printing.Print('log_preds')(log_preds)
+            a = theano.printing.Print('a')(a)
+
+        a = T.clip(a, 1e-15, 1 - 1e-15)
+        log_a = T.log(a)
+        if debug:
+            log_a = theano.printing.Print('log_a')(log_a)
+
         if debug:
             y = theano.printing.Print('y')(y)
-        sum_logs = T.sum(y * log_preds)
+
+        sum_logs = T.sum(y * log_a)
         if debug:
             sum_logs = theano.printing.Print('sum_logs')(sum_logs)
-        log_loss = (-1.0 / y.shape[0]) * sum_logs
+
+        n = y.shape[0]
+
+        log_loss = (-1. / n) * sum_logs
         if debug:
             log_loss = theano.printing.Print('log_loss')(log_loss)
 
-        regularization = (self.lmbda / 2.) * T.mean(
-            T.sum(T.sqr(self.W), axis=1)
-        )
+        # noinspection PyUnresolvedReferences
+        lmbda = T.cast(self.lmbda, dtype=theano.config.floatX)
+        regularization = (lmbda / (2. * n)) * T.sum(T.sqr(self.W))
 
         regularized_log_loss = log_loss + regularization
+        if debug:
+            regularized_log_loss = theano.printing.Print(
+                'regularized_log_loss')(regularized_log_loss)
 
         return regularized_log_loss
-        # return log_loss
 
     def predict_proba(self):
         return self.p_y_given_x
