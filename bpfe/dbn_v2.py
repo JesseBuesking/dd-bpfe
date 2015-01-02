@@ -268,18 +268,18 @@ def DBN_tuning(percent):
     settings.k = 1
     settings.hidden_layers = [
         HiddenLayerSettings(
-            500,
-            9,
+            1000,
+            4,
             ptlr
         ),
         HiddenLayerSettings(
-            500,
-            9,
+            1000,
+            1,
             ptlr
         ),
         HiddenLayerSettings(
-            500,
-            9,
+            1000,
+            1,
             ptlr
         ),
         # HiddenLayerSettings(
@@ -349,6 +349,8 @@ def DBN_run(percent):
 
 def _run_with_params(settings, percent):
     for klass, (klass_num, count) in KLASS_LABEL_INFO.items():
+        if klass != 'Function':
+            continue
         dbn, datasets = pretrain(settings, percent)
         finetune(dbn, datasets, settings, percent, klass, klass_num, count)
 
@@ -634,7 +636,7 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count, percent):
         train_data = train_data[shuffler]
         train_labels = train_labels[shuffler]
 
-        to_gpu_size = 5000
+        to_gpu_size = 1000
         to_gpu_batches = int(
             math.ceil(train_data.shape[0] / float(to_gpu_size))
         )
@@ -821,7 +823,7 @@ def _td(value):
     return '%02d:%02d:%02d' % (hours, minutes, seconds)
 
 if __name__ == '__main__':
-    DBN_tuning(.05)
+    DBN_tuning(1.)
     # DBN_run()
     # stats()
 

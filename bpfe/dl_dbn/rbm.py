@@ -387,15 +387,13 @@ class RBM(object):
         y = self.input
         a = T.nnet.sigmoid(pre_sigmoid_nv)
 
-        cross_entropy = T.mean(
+        cross_entropy = -T.mean(
             T.sum(y * T.log(a) + (1 - y) * T.log(1 - a), axis=1)
         )
 
-        n = y.shape[0]
-
         regularization = \
-            (self.lmbda / (2. * n)) * \
-            (self.weight_decay_cost * T.sum(T.sqr(self.W)))
+            (self.lmbda / 2.) * \
+            (T.mean(T.sum(T.sqr(self.W), axis=1)))
 
         regularized_cross_entropy = cross_entropy + regularization
 

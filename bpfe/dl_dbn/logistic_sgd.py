@@ -202,7 +202,7 @@ class LogisticRegression(object):
 
         # noinspection PyUnresolvedReferences
         lmbda = T.cast(self.lmbda, dtype=theano.config.floatX)
-        regularization = (lmbda / (2. * n)) * T.sum(T.sqr(self.W))
+        regularization = (lmbda / 2.) * T.mean(T.sum(T.sqr(self.W), axis=1))
 
         regularized_log_loss = log_loss + regularization
         if debug:

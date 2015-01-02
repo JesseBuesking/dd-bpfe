@@ -497,7 +497,7 @@ class DBN(object):
 
         def pred(data, X, predict_proba_i):
             predict_probas = None
-            to_gpu_size = 5000
+            to_gpu_size = 1000
             to_gpu_batches = int(
                 math.ceil(data.shape[0] / float(to_gpu_size))
             )
@@ -523,6 +523,7 @@ class DBN(object):
                             (predict_probas, predict_proba_i(batch_index)),
                             axis=0
                         )
+                del subset_data
             return predict_probas
 
         return train_fn, train_preds, valid_preds, test_preds, submission_preds
