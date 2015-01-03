@@ -52,8 +52,9 @@ class LogisticRegression(object):
     determine a class membership probability.
     """
 
-    def __init__(self, input_vector, n_in, n_out, lmbda, numpy_rng):
-        """ Initialize the parameters of the logistic regression
+    def __init__(self, input_vector, n_in, n_out, lmbda):
+        """
+        Initialize the parameters of the logistic regression
 
         :type input_vector: theano.tensor.TensorType
         :param input_vector: symbolic variable that describes the input of the
@@ -66,7 +67,6 @@ class LogisticRegression(object):
         :type n_out: int
         :param n_out: number of output units, the dimension of the space in
          which the labels lie
-
         """
         # start-snippet-1
         # initialize with 0 the weights W as a matrix of shape (n_in, n_out)

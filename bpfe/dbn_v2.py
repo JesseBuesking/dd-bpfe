@@ -16,7 +16,6 @@ from bpfe.config import KLASS_LABEL_INFO, Settings, \
     HiddenLayerSettings, FinetuningSettings, ChunkSettings, \
     REVERSE_LABEL_MAPPING, LABELS, LABEL_MAPPING
 from bpfe.dl_dbn.DBN import DBN
-import numpy
 import bpfe.load as load
 import numpy as np
 from bpfe.vectorizer.BPFEVectorizer import BPFEVectorizer
@@ -35,40 +34,16 @@ except:
 
 
 data_dir = dirname(dirname(__file__)) + '/data'
-NP_NDARRAY = None
-NP_ARRAY = None
-
-
-def _get_np_ndarray(shape, dtype):
-    global NP_NDARRAY
-    if not NP_NDARRAY is None and \
-                    NP_NDARRAY.shape == shape and \
-                    NP_NDARRAY.dtype == dtype:
-        return NP_NDARRAY
-
-    NP_NDARRAY = np.empty(shape, dtype, order='C')
-    return NP_NDARRAY
-
-
-def _get_np_array(shape, dtype):
-    global NP_ARRAY
-    if not NP_ARRAY is None and \
-                    NP_ARRAY.shape == shape and \
-                    NP_ARRAY.dtype == dtype:
-        return NP_ARRAY
-
-    NP_ARRAY = np.empty(shape, dtype, order='C')
-    return NP_ARRAY
 
 
 def create_datasets():
     def shared_dataset():
         shared_x = theano.shared(
-            numpy.asarray([[]], dtype=DTYPES.FLOATX),
+            np.asarray([[]], dtype=DTYPES.FLOATX),
             borrow=True
         )
         shared_y = theano.shared(
-            numpy.asarray([[]], dtype=DTYPES.FLOATX),
+            np.asarray([[]], dtype=DTYPES.FLOATX),
             borrow=True
         )
         return shared_x, shared_y
@@ -268,20 +243,20 @@ def DBN_tuning(percent):
     settings.k = 1
     settings.hidden_layers = [
         HiddenLayerSettings(
-            1000,
+            2000,
             2,
             ptlr
         ),
-        # HiddenLayerSettings(
-        #     2000,
-        #     8,
-        #     ptlr
-        # ),
-        # HiddenLayerSettings(
-        #     2000,
-        #     8,
-        #     ptlr
-        # ),
+        HiddenLayerSettings(
+            2000,
+            2,
+            ptlr
+        ),
+        HiddenLayerSettings(
+            2000,
+            2,
+            ptlr
+        ),
 
         # HiddenLayerSettings(
         #     100,
@@ -352,8 +327,8 @@ def _run_with_params(settings, percent):
     for klass, (klass_num, count) in KLASS_LABEL_INFO.items():
         if klass != 'Function':
             continue
-        dbn, datasets, settings = pretrain(settings, percent)
-        finetune(dbn, datasets, settings, percent, klass, klass_num, count)
+        dbn, settings = pretrain(settings, percent)
+        finetune(dbn, settings, percent, klass, klass_num, count)
 
 
 def pretrain(settings, percent):
@@ -381,7 +356,7 @@ def pretrain(settings, percent):
     print('train size: {}'.format(settings.train_size))
 
     # noinspection PyUnresolvedReferences
-    settings.numpy_rng = numpy.random.RandomState(123)
+    settings.numpy_rng = np.random.RandomState(123)
     # theano random generator
     settings.theano_rng = RandomStreams(
         settings.numpy_rng.randint(2 ** 30)
@@ -396,10 +371,11 @@ def pretrain(settings, percent):
         hidden_layers_sizes=[hl.num_nodes for hl in settings.hidden_layers],
         n_outs=104
     )
-    a = dbn.load()
+    # a = dbn.load()
+    a = cache.load_full_dbn(percent, settings.version)
     if a is not None:
-        datasets, settings = cache.load_dbn(percent, settings.version)
-        return a, datasets, settings
+        settings = cache.load_settings(percent, settings.version)
+        return a, settings
 
     #########################
     # PRETRAINING THE MODEL #
@@ -508,7 +484,7 @@ def pretrain(settings, percent):
                 'gap {:.4f}'.format(
                     layer_idx,
                     epoch,
-                    numpy.mean(c),
+                    np.mean(c),
                     _td(time.clock() - tstart),
                     np.mean(fe_all),
                     np.mean(fe_validate),
@@ -546,44 +522,29 @@ def pretrain(settings, percent):
         )
     )
 
-    cache.save_dbn(datasets, settings, percent, settings.version)
-    dbn.save()
+    cache.save_settings(settings, percent, settings.version)
+    cache.save_full_dbn(dbn, percent, settings.version)
+    # dbn.save()
 
-    return dbn, datasets, settings
+    return dbn, settings
 
 
-def finetune(dbn, datasets, settings, percent, klass, klass_num, count):
+def finetune(dbn, settings, percent, klass, klass_num, count):
     dbn.number_of_outputs = count
-    finetune_class(dbn, datasets, settings, klass, klass_num, count, percent)
+    finetune_class(dbn, settings, klass, klass_num, count, percent)
 
     # try_predict_test(datasets, settings, klass, klass_num)
 
 
-def finetune_class(dbn, datasets, settings, klass, klass_num, count, percent):
+def finetune_class(dbn, settings, klass, klass_num, count, percent):
     scores = []
-    (train_set_x, train_set_y) = datasets[0]
 
     epoch = 0
     val = cache.load_finetuning(settings, klass_num)
-    if val is not None:
+    if val[0] is not None:
         dbn, settings, epoch = val
-        train_fn, train_pred, valid_pred, test_pred, submission_pred = \
-            dbn.build_finetune_functions(
-                datasets=datasets,
-                batch_size=settings.batch_size,
-                learning_rate=settings.finetuning.learning_rate
-            )
     else:
-        dbn.create_output_layer(settings.train_size, settings.numpy_rng)
-
-        # get the training, validation and testing function for the model
-        print('... getting the finetuning functions')
-        train_fn, train_pred, valid_pred, test_pred, submission_pred = \
-            dbn.build_finetune_functions(
-                datasets=datasets,
-                batch_size=settings.batch_size,
-                learning_rate=settings.finetuning.learning_rate
-            )
+        dbn.create_output_layer(settings.train_size)
 
     def get_mmll(name):
         _data = get_vects(name, percent=percent)
@@ -594,11 +555,11 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count, percent):
             argmax=False
         )
         if name == 'train':
-            preds = train_pred(_data)
+            preds = dbn.predict_proba(_data, settings.batch_size)
         elif name == 'validate':
-            preds = valid_pred(_data)
+            preds = dbn.predict_proba(_data, settings.batch_size)
         elif name == 'test':
-            preds = test_pred(_data)
+            preds = dbn.predict_proba(_data, settings.batch_size)
         else:
             raise
         mmll = scoring.multi_multi_log_loss(
@@ -641,30 +602,14 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count, percent):
         train_data = train_data[shuffler]
         train_labels = train_labels[shuffler]
 
-        to_gpu_size = 1000
-        to_gpu_batches = int(
-            math.ceil(train_data.shape[0] / float(to_gpu_size))
+        dbn.finetune(
+            train_data,
+            train_labels,
+            settings.batch_size,
+            settings.finetuning.learning_rate,
+            # momentum
+            0.9
         )
-        for to_gpu_batch in range(to_gpu_batches):
-            start = (to_gpu_batch * to_gpu_size)
-            end = min(start + to_gpu_size, train_data.shape[0])
-            subset_data = csr_matrix(
-                train_data[start:end],
-                dtype=DTYPES.FLOATX
-            )
-            subset_data = subset_data.todense()
-            subset_labels = np.array(
-                train_labels[start:end],
-                dtype=DTYPES.FLOATX
-            )
-            train_set_x.set_value(subset_data, borrow=True)
-            train_set_y.set_value(subset_labels, borrow=True)
-
-            n_train_batches = int(
-                math.ceil(subset_data.shape[0] / float(settings.batch_size))
-            )
-            for batch_index in xrange(n_train_batches):
-                train_fn(batch_index)
 
         val_mmll = get_mmll('validate')
 
@@ -777,7 +722,7 @@ def try_predict_test(datasets, settings, klass, klass_num):
         []
     )
     for data in red:
-        am = numpy.argmax(test_predictions[idx])
+        am = np.argmax(test_predictions[idx])
         actual_num = data[1].to_klass_num(klass_num)
         miss = actual_num != am
         matches += not miss
@@ -786,8 +731,8 @@ def try_predict_test(datasets, settings, klass, klass_num):
 
         # noinspection PyUnresolvedReferences
         score += ((
-                      numpy.array(data[1].to_vec(klass_num)) - test_predictions[idx]
-                  ) ** 2).sum()
+            np.array(data[1].to_vec(klass_num)) - test_predictions[idx]
+        ) ** 2).sum()
 
         # print first 3 misses
         if misses <= 3 and miss:

@@ -6,7 +6,7 @@ import os
 import gzip
 import math
 
-import numpy
+import numpy as np
 from scipy.sparse import csr_matrix
 
 import theano
@@ -155,7 +155,7 @@ class DBN(object):
         # the first layer
         layer_input = self.x
         if layer_num != 0:
-            layer_input = self.sigmoid_layers[-1].output
+            layer_input = self.sigmoid_layers[-1].output()
 
         sigmoid_layer = SigmoidLayer(
             numpy_rng=numpy_rng,
@@ -189,20 +189,21 @@ class DBN(object):
 
         return rbm_layer
 
-    def create_output_layer(self, train_size, numpy_rng):
+    def create_output_layer(self, train_size):
         # We now need to add a logistic layer on top of the MLP
         self.logLayer = LogisticRegression(
             input_vector=self.sigmoid_layers[-1].output(),
             n_in=self.hidden_layer_sizes[-1],
             n_out=self.number_of_outputs,
-            lmbda=train_size / 1000.,
-            numpy_rng=numpy_rng
+            lmbda=train_size / 1000.
         )
         self.params.extend(self.logLayer.params)
 
-    def pretraining_function(self, train_set_x, batch_size, k, layer_num,
-                             numpy_rng, theano_rng, train_size, load=False):
-        """Generates a list of functions, for performing one step of
+    def pretraining_function(
+            self, train_set_x, batch_size, k, layer_num, numpy_rng, theano_rng,
+            train_size, load=False):
+        """
+        Generates a list of functions, for performing one step of
         gradient descent at a given layer. The function will require
         as input the minibatch index, and to train an RBM you just
         need to iterate, calling the corresponding function on all
@@ -214,7 +215,6 @@ class DBN(object):
         :type batch_size: int
         :param batch_size: size of a [mini]batch
         :param k: number of Gibbs steps to do in CD-k / PCD-k
-
         """
 
         # index to a [mini]batch
@@ -230,7 +230,11 @@ class DBN(object):
             rbm = self.rbm_layers[layer_num]
         else:
             rbm = self.create_hidden_layer(
-                layer_num, numpy_rng, theano_rng, train_size)
+                layer_num,
+                numpy_rng,
+                theano_rng,
+                train_size
+            )
 
             # get the cost and the updates list
             # using CD-k here (persistent=None) for training each RBM.
@@ -247,7 +251,12 @@ class DBN(object):
             }
         )
 
+        ##################################
+        # computes the current free energy
+        ##################################
+
         def recursive(X, total_layers, current_layer):
+            # recursively propogate input data through each layer of the DBN
             if current_layer != 0:
                 X = recursive(
                     X,
@@ -258,9 +267,9 @@ class DBN(object):
             if total_layers == current_layer:
                 return X
             else:
-                v = self.rbm_layers[current_layer].sample_h_given_v(X)[2]
-                return v
+                return self.rbm_layers[current_layer].sample_h_given_v(X)[2]
 
+        # function to compute the actual free energy
         free_energy = theano.function(
             inputs=[],
             outputs=self.rbm_layers[-1].free_energy(
@@ -273,34 +282,68 @@ class DBN(object):
 
         return fn, free_energy
 
-    def build_finetune_functions(self, datasets, batch_size, learning_rate,
-                                 momentum=0.9):
-        """Generates a function `train` that implements one step of
-        finetuning, a function `validate` that computes the error on a
-        batch from the validation set, and a function `test` that
-        computes the error on a batch from the testing set
+    def predict_proba(self, data, batch_size):
+        X = theano.shared(
+            np.asarray([[]], dtype=DTYPES.FLOATX),
+            borrow=True
+        )
 
-        :type datasets: list of pairs of theano.tensor.TensorType
-        :param datasets: It is a list that contain all the datasets;
-                        the has to contain three pairs, `train`,
-                        `valid`, `test` in this order, where each pair
-                        is formed of two Theano variables, one for the
-                        datapoints, the other for the labels
-        :type batch_size: int
-        :param batch_size: size of a minibatch
-        :type learning_rate: float
-        :param learning_rate: learning rate used during finetune stage
+        # index to a [mini]batch
+        index = T.lscalar('index')
 
-        """
+        func = theano.function(
+            [index],
+            self.logLayer.predict_proba(),
+            givens={
+                self.x: X[
+                    index * batch_size: (index + 1) * batch_size
+                ]
+            }
+        )
 
-        (train_set_x, train_set_y) = datasets[0]
-        (valid_set_x, valid_set_y) = datasets[1]
-        (test_set_x, test_set_y) = datasets[2]
-        (submission_set_x, submission_set_y) = datasets[3]
+        predict_probas = None
+        to_gpu_size = 1000
+        to_gpu_batches = int(
+            math.ceil(data.shape[0] / float(to_gpu_size))
+        )
+        for to_gpu_batch in range(to_gpu_batches):
+            start = (to_gpu_batch * to_gpu_size)
+            end = min(start + to_gpu_size, data.shape[0])
+            subset_data = csr_matrix(
+                data[start:end],
+                dtype=DTYPES.FLOATX
+            )
+            subset_data = subset_data.todense()
+            X.set_value(subset_data, borrow=True)
 
-        index = T.lscalar('index')  # index to a [mini]batch
+            n_batches = int(
+                math.ceil(subset_data.shape[0] / float(10))
+            )
+            for batch_index in xrange(n_batches):
+                if predict_probas is None:
+                    predict_probas = func(batch_index)
+                else:
+                    predict_probas = np.concatenate(
+                        (predict_probas, func(batch_index)),
+                        axis=0
+                    )
+            del subset_data
+        return predict_probas
 
-        learning_rate = T.cast(0.1, dtype=DTYPES.FLOATX)
+    def finetune(self, dataX, dataY, batch_size, learning_rate, momentum):
+        X = theano.shared(
+            np.asarray([[]], dtype=DTYPES.FLOATX),
+            borrow=True
+        )
+        Y = theano.shared(
+            np.asarray([[]], dtype=DTYPES.FLOATX),
+            borrow=True
+        )
+
+        # index to a [mini]batch
+        index = T.lscalar('index')
+        learning_rate = T.cast(learning_rate, dtype=DTYPES.FLOATX)
+        momentum = T.cast(momentum, dtype=DTYPES.FLOATX)
 
         def momentumed(pidx, param, momentum):
             # We must not compute the gradient through the gibbs sampling
@@ -326,174 +369,44 @@ class DBN(object):
         # compute list of fine-tuning updates
         updates = []
         for pidx, param in enumerate(self.params):
-            # # regular
-            # grad = T.grad(self.logLayer.bpfe_log_loss(self.y), param)
-            # updates.append((param, param - (learning_rate * grad)))
-
             momentumed(pidx, param, momentum)
-
-            # # if len(self.MSs) < pidx + 1:
-            # #     # initialize momentum for this element to zeros
-            # #     # noinspection PyUnresolvedReferences
-            # #     # self.MSs.append(theano.shared(1.))
-            # #     self.MSs.append(theano.shared(
-            # #         (param.get_value() * 0.) + 1,
-            # #         broadcastable=param.broadcastable
-            # #     ))
-            # #
-            # # MS_update = self.MSs[pidx]
-            # #
-            # grad = T.grad(self.logLayer.bpfe_log_loss(self.y), param)
-            # #
-            # # current_rmsprop = T.cast(
-            # #     T.minimum(
-            # #         T.maximum(
-            # #             (0.9 * MS_update) + (0.1 * T.sqr(grad)),
-            # #             1e-8
-            # #         ),
-            # #         1. - 1e-8
-            # #     ),
-            # #     dtype=DTYPES.FLOATX
-            # # )
-            # #
-            # # updates.append((MS_update, current_rmsprop))
-            # # # current_rmsprop = theano.printing.Print('crms')(current_rmsprop)
-            # #
-            # # # noinspection PyUnresolvedReferences
-            # # learning_rate = T.sqrt(current_rmsprop)
-            # # # learning_rate = theano.printing.Print('lr')(learning_rate)
-            #
-            # # original
-            # updates.append((param, param - (learning_rate * grad)))
-            #
-            # # # TODO REMOVE ME
-            # # try:
-            # #     blah = self.Ms
-            # # except AttributeError:
-            # #     self.Ms = []
-            # # if len(self.Ms) < pidx + 1:
-            # #     # initialize momentum for this element to zeros
-            # #     self.Ms.append(theano.shared(
-            # #         param.get_value() * 0.,
-            # #         broadcastable=param.broadcastable
-            # #     ))
-            # #
-            # # param_update = self.Ms[pidx]
-            # #
-            # # # make sure that the learning rate is of the right dtype
-            # # learning_rate = T.cast(learning_rate, dtype=DTYPES.FLOATX)
-            # # momentum = T.cast(momentum, dtype=DTYPES.FLOATX)
-            # #
-            # # current_cost = learning_rate * param_update
-            # # updates.append((
-            # #     param,
-            # #     # theano.printing.Print('pc')(param - current_cost)
-            # #     (param - current_cost)
-            # # ))
-            # #
-            # # updates.append((
-            # #     param_update,
-            # #     # theano.printing.Print('mpg')(mom + grad)
-            # #     (momentum * param_update) + grad
-            # # ))
 
         train_fn = theano.function(
             inputs=[index],
             outputs=self.logLayer.bpfe_log_loss(self.y),
             updates=updates,
             givens={
-                self.x: train_set_x[
+                self.x: X[
                     index * batch_size: (index + 1) * batch_size
                 ],
-                self.y: train_set_y[
-                    index * batch_size: (index + 1) * batch_size
-                ]
-            },
-            # mode=theano.compile.debugmode.DebugMode(check_isfinite=True)
-        )
-
-        train_predict_proba_i = theano.function(
-            [index],
-            self.logLayer.predict_proba(),
-            givens={
-                self.x: train_set_x[
+                self.y: Y[
                     index * batch_size: (index + 1) * batch_size
                 ]
             }
         )
 
-        valid_predict_proba_i = theano.function(
-            [index],
-            self.logLayer.predict_proba(),
-            givens={
-                self.x: valid_set_x[
-                    index * batch_size: (index + 1) * batch_size
-                ]
-            }
+        to_gpu_size = 1000
+        to_gpu_batches = int(
+            math.ceil(dataX.shape[0] / float(to_gpu_size))
         )
-
-        test_predict_proba_i = theano.function(
-            [index],
-            self.logLayer.predict_proba(),
-            givens={
-                self.x: test_set_x[
-                    index * batch_size: (index + 1) * batch_size
-                ]
-            }
-        )
-
-        submission_predict_proba_i = theano.function(
-            [index],
-            self.logLayer.predict_proba(),
-            givens={
-                self.x: submission_set_x[
-                    index * batch_size: (index + 1) * batch_size
-                ]
-            }
-        )
-
-        #### PREDICTION PROBABILITY FUNCTIONS
-
-        def train_preds(gen):
-            return pred(gen, train_set_x, train_predict_proba_i)
-
-        def valid_preds(gen):
-            return pred(gen, valid_set_x, valid_predict_proba_i)
-
-        def test_preds(gen):
-            return pred(gen, test_set_x, test_predict_proba_i)
-
-        def submission_preds(gen):
-            return pred(gen, submission_set_x, submission_predict_proba_i)
-
-        def pred(data, X, predict_proba_i):
-            predict_probas = None
-            to_gpu_size = 1000
-            to_gpu_batches = int(
-                math.ceil(data.shape[0] / float(to_gpu_size))
+        for to_gpu_batch in range(to_gpu_batches):
+            start = (to_gpu_batch * to_gpu_size)
+            end = min(start + to_gpu_size, dataX.shape[0])
+            subset_data = csr_matrix(
+                dataX[start:end],
+                dtype=DTYPES.FLOATX
             )
-            for to_gpu_batch in range(to_gpu_batches):
-                start = (to_gpu_batch * to_gpu_size)
-                end = min(start + to_gpu_size, data.shape[0])
-                subset_data = csr_matrix(
-                    data[start:end],
-                    dtype=DTYPES.FLOATX
-                )
-                subset_data = subset_data.todense()
-                X.set_value(subset_data, borrow=True)
+            subset_data = subset_data.todense()
+            subset_labels = np.array(
+                dataY[start:end],
+                dtype=DTYPES.FLOATX
+            )
+            X.set_value(subset_data, borrow=True)
+            Y.set_value(subset_labels, borrow=True)
 
-                n_batches = int(
-                    math.ceil(subset_data.shape[0] / float(10))
-                )
-                for batch_index in xrange(n_batches):
-                    if predict_probas is None:
-                        predict_probas = predict_proba_i(batch_index)
-                    else:
-                        predict_probas = numpy.concatenate(
-                            (predict_probas, predict_proba_i(batch_index)),
-                            axis=0
-                        )
-                del subset_data
-            return predict_probas
-
-        return train_fn, train_preds, valid_preds, test_preds, submission_preds
+            n_train_batches = int(
+                math.ceil(subset_data.shape[0] / float(batch_size))
+            )
+            for batch_index in xrange(n_train_batches):
+                train_fn(batch_index)
+            del subset_data

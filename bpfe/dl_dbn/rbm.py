@@ -253,12 +253,15 @@ class RBM(object):
         # decide how to initialize persistent chain:
         # for CD, we use the newly generate hidden sample
         chain_start = ph_sample
+
         # perform actual negative phase
         # in order to implement CD-k/PCD-k we need to scan over the
         # function that implements one gibbs step k times.
         # Read Theano tutorial on scan for more information :
         # http://deeplearning.net/software/theano/library/scan.html
         # the scan will return the entire Gibbs chain
+
+        # noinspection PyCallingNonCallable, PyUnusedLocal
         (
             [
                 pre_sigmoid_nvs,
@@ -293,6 +296,7 @@ class RBM(object):
 
         learning_rate = T.cast(0.01, dtype=DTYPES.FLOATX)
 
+        # noinspection PyUnusedLocal
         def regulared(pidx, param):
             # We must not compute the gradient through the gibbs sampling
             grad = T.grad(cost, param, consider_constant=[chain_end])
@@ -318,6 +322,7 @@ class RBM(object):
             updates[M_update] = v_prime
             updates[param] = w_prime
 
+        # noinspection PyUnusedLocal
         def rmsproped(pidx, param):
             # NOTE : matrix of learning rates
             if len(self.MSs) < pidx + 1:
@@ -367,7 +372,6 @@ class RBM(object):
 
         # reconstruction cross-entropy is a better proxy for CD
         monitoring_cost = self.get_reconstruction_cost(
-            updates,
             pre_sigmoid_nvs[-1]
         )
 
@@ -375,7 +379,7 @@ class RBM(object):
         self.updates = updates
         self.learning_rate = lr
 
-    def get_reconstruction_cost(self, updates, pre_sigmoid_nv):
+    def get_reconstruction_cost(self, pre_sigmoid_nv):
         """Approximation to the reconstruction error
 
         Note that this function requires the pre-sigmoid activation as

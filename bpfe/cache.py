@@ -16,26 +16,49 @@ import gzip
 import os
 
 
-def save_dbn(datasets, settings, percent, version):
-    fname = 'data/pretrain-layer/dbn-other-{}-{}'.format(
+def save_full_dbn(dbn, percent, version):
+    fname = 'data/pretrain-layer/dbn-{}-{}'.format(
         version, percent
     )
-    with gzip.open(fname, 'wb') as ifile:
+    with open(fname, 'wb') as ifile:
         pickle.dump(
-            (datasets, settings),
+            dbn,
             ifile,
             protocol=pickle.HIGHEST_PROTOCOL
         )
 
 
-def load_dbn(percent, version):
+def load_full_dbn(percent, version):
+    fname = 'data/pretrain-layer/dbn-{}-{}'.format(
+        version, percent
+    )
+    if not os.path.exists(fname):
+        return None
+
+    with open(fname, 'rb') as ifile:
+        return pickle.load(ifile)
+
+
+def save_settings(settings, percent, version):
+    fname = 'data/pretrain-layer/dbn-other-{}-{}'.format(
+        version, percent
+    )
+    with open(fname, 'wb') as ifile:
+        pickle.dump(
+            settings,
+            ifile,
+            protocol=pickle.HIGHEST_PROTOCOL
+        )
+
+
+def load_settings(percent, version):
     fname = 'data/pretrain-layer/dbn-other-{}-{}'.format(
         version, percent
     )
     if not os.path.exists(fname):
-        return None, None
+        return None
 
-    with gzip.open(fname, 'rb') as ifile:
+    with open(fname, 'rb') as ifile:
         return pickle.load(ifile)
 
 
@@ -104,7 +127,7 @@ def load_finetuning(settings, klass_num):
     pth = 'data/finetuning'
     files = [f for f in listdir(pth) if isfile(join(pth, f))]
     if len(files) <= 0:
-        return None
+        return None, None, None
 
     this_run_epochs = settings.finetuning.epochs
 
@@ -125,7 +148,7 @@ def load_finetuning(settings, klass_num):
             break
 
     if not os.path.exists(fname):
-        return None
+        return None, None, None
 
     with gzip.open(fname, 'rb') as ifile:
         data = pickle.load(ifile)

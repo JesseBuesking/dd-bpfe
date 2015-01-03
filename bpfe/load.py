@@ -10,11 +10,10 @@ from bpfe.entities import Data, Label
 from bpfe.feature_engineering import get_vectorizers
 from bpfe.reservoir import reservoir
 import math
-
-# noinspection PyBroadException
 from bpfe.text_transform import transform
 
 
+# noinspection PyBroadException
 try:
     import cPickle as pickle
 except:
