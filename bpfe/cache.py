@@ -16,8 +16,31 @@ import gzip
 import os
 
 
+def save_dbn(datasets, settings, percent, version):
+    fname = 'data/pretrain-layer/dbn-other-{}-{}'.format(
+        version, percent
+    )
+    with gzip.open(fname, 'wb') as ifile:
+        pickle.dump(
+            (datasets, settings),
+            ifile,
+            protocol=pickle.HIGHEST_PROTOCOL
+        )
+
+
+def load_dbn(percent, version):
+    fname = 'data/pretrain-layer/dbn-other-{}-{}'.format(
+        version, percent
+    )
+    if not os.path.exists(fname):
+        return None, None
+
+    with gzip.open(fname, 'rb') as ifile:
+        return pickle.load(ifile)
+
+
 def save_pretrain_layer(dbn, layer_num, settings, epoch):
-    fname = 'data/pretrain-layer/{}-{}.pkl.gz'.format(
+    fname = 'data/pretrain-layer/{}-{}'.format(
         settings.pretrain_fname(layer_num), str(epoch).zfill(5)
     )
     with gzip.open(fname, 'wb') as ifile:

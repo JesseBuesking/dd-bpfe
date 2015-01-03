@@ -8,21 +8,23 @@ to those without visible-visible and hidden-hidden connections.
 import numpy
 import theano
 import theano.tensor as T
+from bpfe.dl_dbn.constants import DTYPES
 
 from theano.tensor.shared_randomstreams import RandomStreams
 
 
-# start-snippet-1
 # noinspection PyCallingNonCallable
+from bpfe.dl_dbn.hidden_layer import HiddenLayer
+
+
 class RBM(object):
     """Restricted Boltzmann Machine (RBM)  """
     def __init__(
         self,
-        input=None,
+        input_vector=None,
         n_in=784,
         n_hidden=500,
-        W=None,
-        hbias=None,
+        hidden_layer=None,
         vbias=None,
         lmbda=0.1,
         momentum=0.9,
@@ -35,7 +37,8 @@ class RBM(object):
         basic operations for inferring hidden from visible (and vice-versa),
         as well as for performing CD updates.
 
-        :param input: None for standalone RBMs or symbolic variable if RBM is
+        :param input_vector: None for standalone RBMs or symbolic variable if
+         RBM is
         part of a larger graph.
 
         :param n_in: number of visible units
@@ -61,6 +64,7 @@ class RBM(object):
 
         if numpy_rng is None:
             # create a number generator
+            # noinspection PyUnresolvedReferences
             numpy_rng = numpy.random.RandomState(1234)
 
         if theano_rng is None:
@@ -71,11 +75,11 @@ class RBM(object):
         self.monitoring_cost = None
         self.updates = None
 
-        if W is None:
+        if hidden_layer is None:
             # W is initialized with `initial_W` which is uniformely
             # sampled from -4*sqrt(6./(n_visible+n_hidden)) and
             # 4*sqrt(6./(n_hidden+n_visible)) the output of uniform if
-            # converted using asarray to dtype theano.config.floatX so
+            # converted using asarray to dtype DTYPES.FLOATX so
             # that the code is runable on GPU
             initial_W = numpy.asarray(
                 self.numpy_rng.uniform(
@@ -88,10 +92,24 @@ class RBM(object):
                     high=4 * numpy.sqrt(6. / (n_hidden + n_in)),
                     size=(n_in, n_hidden)
                 ),
-                dtype=theano.config.floatX
+                dtype=DTYPES.FLOATX
             )
             # theano shared variables for weights and biases
             W = theano.shared(value=initial_W, name='W', borrow=True)
+
+            # create shared variable for hidden units bias
+            hbias = theano.shared(
+                value=numpy.zeros(
+                    n_hidden,
+                    dtype=DTYPES.FLOATX
+                ),
+                name='hbias',
+                borrow=True
+            )
+            self.hidden_layer = HiddenLayer(
+                numpy_rng, None, None, None, W=W, b=hbias)
+        else:
+            self.hidden_layer = hidden_layer
 
         # track momentums
         self.Ms = []
@@ -101,50 +119,37 @@ class RBM(object):
 
         self.momentum = momentum
 
-        if hbias is None:
-            # create shared variable for hidden units bias
-            hbias = theano.shared(
-                value=numpy.zeros(
-                    n_hidden,
-                    dtype=theano.config.floatX
-                ),
-                name='hbias',
-                borrow=True
-            )
-
         if vbias is None:
             # create shared variable for visible units bias
             vbias = theano.shared(
                 value=numpy.zeros(
                     n_in,
-                    dtype=theano.config.floatX
+                    dtype=DTYPES.FLOATX
                 ),
                 name='vbias',
                 borrow=True
             )
 
         # initialize input layer for standalone RBM or layer0 of DBN
-        self.input = input
-        if not input:
+        self.input = input_vector
+        if not input_vector:
             self.input = T.matrix('input')
 
-        self.W = W
-        self.hbias = hbias
         self.vbias = vbias
         # **** WARNING: It is not a good idea to put things in this list
         # other than shared variables created in this function.
-        self.params = [self.W, self.hbias, self.vbias]
-        # end-snippet-1
+        self.params = [self.hidden_layer.W, self.hidden_layer.b, self.vbias]
 
     def free_energy(self, v_sample):
-        ''' Function to compute the free energy '''
-        wx_b = T.dot(v_sample, self.W) + self.hbias
+        """ Function to compute the free energy """
+        wx_b = T.dot(v_sample, self.hidden_layer.W) + self.hidden_layer.b
         vbias_term = T.dot(v_sample, self.vbias)
         hidden_term = T.sum(T.log(1 + T.exp(wx_b)), axis=1)
         return -hidden_term - vbias_term
 
     def propup(self, vis):
-        '''This function propagates the visible units activation upwards to
+        """
+        This function propagates the visible units activation upwards to
         the hidden units
 
         Note that we return also the pre-sigmoid activation of the
@@ -152,27 +157,33 @@ class RBM(object):
         optimizations, this symbolic variable will be needed to write
         down a more stable computational graph (see details in the
         reconstruction cost function)
-
-        '''
-        pre_sigmoid_activation = T.dot(vis, self.W) + self.hbias
+        """
+        pre_sigmoid_activation = \
+            T.dot(vis, self.hidden_layer.W) + self.hidden_layer.b
         return [pre_sigmoid_activation, T.nnet.sigmoid(pre_sigmoid_activation)]
 
     def sample_h_given_v(self, v0_sample):
-        ''' This function infers state of hidden units given visible units '''
+        """ This function infers state of hidden units given visible units """
+
         # compute the activation of the hidden units given a sample of
         # the visibles
         pre_sigmoid_h1, h1_mean = self.propup(v0_sample)
+
         # get a sample of the hiddens given their activation
         # Note that theano_rng.binomial returns a symbolic sample of dtype
         # int64 by default. If we want to keep our computations in floatX
         # for the GPU we need to specify to return the dtype floatX
-        h1_sample = self.theano_rng.binomial(size=h1_mean.shape,
-                                             n=1, p=h1_mean,
-                                             dtype=theano.config.floatX)
+        h1_sample = self.theano_rng.binomial(
+            size=h1_mean.shape,
+            n=1,
+            p=h1_mean,
+            dtype=DTYPES.FLOATX
+        )
         return [pre_sigmoid_h1, h1_mean, h1_sample]
 
     def propdown(self, hid):
-        '''This function propagates the hidden units activation downwards to
+        """
+        This function propagates the hidden units activation downwards to
         the visible units
 
         Note that we return also the pre_sigmoid_activation of the
@@ -180,43 +191,52 @@ class RBM(object):
         optimizations, this symbolic variable will be needed to write
         down a more stable computational graph (see details in the
         reconstruction cost function)
-
-        '''
-        pre_sigmoid_activation = T.dot(hid, self.W.T) + self.vbias
+        """
+        pre_sigmoid_activation = \
+            T.dot(hid, self.hidden_layer.W.T) + self.vbias
         return [pre_sigmoid_activation, T.nnet.sigmoid(pre_sigmoid_activation)]
 
     def sample_v_given_h(self, h0_sample):
-        ''' This function infers state of visible units given hidden units '''
+        """ This function infers state of visible units given hidden units """
+
         # compute the activation of the visible given the hidden sample
         pre_sigmoid_v1, v1_mean = self.propdown(h0_sample)
+
         # get a sample of the visible given their activation
         # Note that theano_rng.binomial returns a symbolic sample of dtype
         # int64 by default. If we want to keep our computations in floatX
         # for the GPU we need to specify to return the dtype floatX
-        v1_sample = self.theano_rng.binomial(size=v1_mean.shape,
-                                             n=1, p=v1_mean,
-                                             dtype=theano.config.floatX)
+        v1_sample = self.theano_rng.binomial(
+            size=v1_mean.shape,
+            n=1,
+            p=v1_mean,
+            dtype=DTYPES.FLOATX
+        )
         return [pre_sigmoid_v1, v1_mean, v1_sample]
 
     def gibbs_hvh(self, h0_sample):
-        ''' This function implements one step of Gibbs sampling,
-            starting from the hidden state'''
+        """
+        This function implements one step of Gibbs sampling, starting from the
+        hidden state
+        """
         pre_sigmoid_v1, v1_mean, v1_sample = self.sample_v_given_h(h0_sample)
         pre_sigmoid_h1, h1_mean, h1_sample = self.sample_h_given_v(v1_sample)
         return [pre_sigmoid_v1, v1_mean, v1_sample,
                 pre_sigmoid_h1, h1_mean, h1_sample]
 
     def gibbs_vhv(self, v0_sample):
-        ''' This function implements one step of Gibbs sampling,
-            starting from the visible state'''
+        """
+        This function implements one step of Gibbs sampling, starting from the
+        visible state
+        """
         pre_sigmoid_h1, h1_mean, h1_sample = self.sample_h_given_v(v0_sample)
         pre_sigmoid_v1, v1_mean, v1_sample = self.sample_v_given_h(h1_sample)
         return [pre_sigmoid_h1, h1_mean, h1_sample,
                 pre_sigmoid_v1, v1_mean, v1_sample]
 
-    # start-snippet-2
     def get_cost_updates(self, lr=0.1, k=1):
-        """This functions implements one step of CD-k or PCD-k
+        """
+        This functions implements one step of CD-k or PCD-k
 
         :param lr: learning rate used to train the RBM
         :param k: number of Gibbs steps to do in CD-k/PCD-k
@@ -225,7 +245,6 @@ class RBM(object):
         dictionary contains the update rules for weights and biases but
         also an update of the shared variable used to store the persistent
         chain, if one is used.
-
         """
 
         # compute positive phase
@@ -234,7 +253,6 @@ class RBM(object):
         # decide how to initialize persistent chain:
         # for CD, we use the newly generate hidden sample
         chain_start = ph_sample
-        # end-snippet-2
         # perform actual negative phase
         # in order to implement CD-k/PCD-k we need to scan over the
         # function that implements one gibbs step k times.
@@ -259,7 +277,6 @@ class RBM(object):
             outputs_info=[None, None, None, None, None, chain_start],
             n_steps=k
         )
-        # start-snippet-3
         # determine gradients on RBM parameters
         # note that we only need the sample at the end of the chain
         chain_end = nv_samples[-1]
@@ -274,8 +291,7 @@ class RBM(object):
         #
         # cost += regularization
 
-        # noinspection PyUnresolvedReferences
-        learning_rate = T.cast(0.01, dtype=theano.config.floatX)
+        learning_rate = T.cast(0.01, dtype=DTYPES.FLOATX)
 
         def regulared(pidx, param):
             # We must not compute the gradient through the gibbs sampling
@@ -295,8 +311,7 @@ class RBM(object):
 
             grad = T.grad(cost, param, consider_constant=[chain_end])
 
-            # noinspection PyUnresolvedReferences
-            momentum = T.cast(self.momentum, dtype=theano.config.floatX)
+            momentum = T.cast(self.momentum, dtype=DTYPES.FLOATX)
 
             v_prime = momentum * M_update - learning_rate * grad
             w_prime = param + v_prime
@@ -319,10 +334,8 @@ class RBM(object):
 
             grad = T.grad(cost, param, consider_constant=[chain_end])
 
-            # noinspection PyUnresolvedReferences
-            decay = T.cast(.9, dtype=theano.config.floatX)
-            # noinspection PyUnresolvedReferences
-            one_minus_decay = T.cast(.1, dtype=theano.config.floatX)
+            decay = T.cast(.9, dtype=DTYPES.FLOATX)
+            one_minus_decay = T.cast(.1, dtype=DTYPES.FLOATX)
 
             # NOTE: matrix of learning weights
             current_rmsprop = \
@@ -336,10 +349,9 @@ class RBM(object):
 
             updates[MS_update] = current_rmsprop
 
-            # noinspection PyUnresolvedReferences
             learning_rate = .1 / current_rmsprop
             # learning_rate = T.sqrt(
-            #     T.cast(current_rmsprop, dtype=theano.config.floatX)
+            #     T.cast(current_rmsprop, dtype=DTYPES.FLOATX)
             # )
             # if True:
             #     learning_rate = theano.printing.Print('lr')(learning_rate)
@@ -362,7 +374,6 @@ class RBM(object):
         self.monitoring_cost = monitoring_cost
         self.updates = updates
         self.learning_rate = lr
-        # end-snippet-4
 
     def get_reconstruction_cost(self, updates, pre_sigmoid_nv):
         """Approximation to the reconstruction error

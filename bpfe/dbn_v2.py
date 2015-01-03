@@ -1,6 +1,7 @@
 # coding=utf-8
-import gzip
 
+
+import gzip
 import os
 from os.path import dirname
 import sys
@@ -19,6 +20,7 @@ import numpy
 import bpfe.load as load
 import numpy as np
 from bpfe.vectorizer.BPFEVectorizer import BPFEVectorizer
+from bpfe.dl_dbn.constants import DTYPES
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
@@ -61,14 +63,12 @@ def _get_np_array(shape, dtype):
 
 def create_datasets():
     def shared_dataset():
-        # noinspection PyUnresolvedReferences
         shared_x = theano.shared(
-            numpy.asarray([[]], dtype=theano.config.floatX),
+            numpy.asarray([[]], dtype=DTYPES.FLOATX),
             borrow=True
         )
-        # noinspection PyUnresolvedReferences
         shared_y = theano.shared(
-            numpy.asarray([[]], dtype=theano.config.floatX),
+            numpy.asarray([[]], dtype=DTYPES.FLOATX),
             borrow=True
         )
         return shared_x, shared_y
@@ -352,7 +352,7 @@ def _run_with_params(settings, percent):
     for klass, (klass_num, count) in KLASS_LABEL_INFO.items():
         if klass != 'Function':
             continue
-        dbn, datasets = pretrain(settings, percent)
+        dbn, datasets, settings = pretrain(settings, percent)
         finetune(dbn, datasets, settings, percent, klass, klass_num, count)
 
 
@@ -391,10 +391,15 @@ def pretrain(settings, percent):
 
     # construct the Deep Belief Network
     dbn = DBN(
+        name='{}-{}'.format(settings.version, percent),
         n_ins=settings.num_cols,
         hidden_layers_sizes=[hl.num_nodes for hl in settings.hidden_layers],
         n_outs=104
     )
+    a = dbn.load()
+    if a is not None:
+        datasets, settings = cache.load_dbn(percent, settings.version)
+        return a, datasets, settings
 
     #########################
     # PRETRAINING THE MODEL #
@@ -456,10 +461,9 @@ def pretrain(settings, percent):
             for to_gpu_batch in range(to_gpu_batches):
                 start = (to_gpu_batch * to_gpu_size)
                 end = min(start + to_gpu_size, all_data.shape[0])
-                # noinspection PyUnresolvedReferences
                 subset = csr_matrix(
                     all_data[start:end],
-                    dtype=theano.config.floatX
+                    dtype=DTYPES.FLOATX
                 )
                 subset = subset.todense()
                 train_set_x.set_value(subset, borrow=True)
@@ -477,10 +481,9 @@ def pretrain(settings, percent):
             # and also for a validation subset (use for overfitting)
             # https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf#6.1
             all_data = get_vects(name=training_dataset_names, percent=percent)
-            # noinspection PyUnresolvedReferences
             all_data = csr_matrix(
                 all_data[:min(2500, all_data.shape[0])],
-                dtype=theano.config.floatX
+                dtype=DTYPES.FLOATX
             )
             train_set_x.set_value(all_data.todense(), borrow=True)
             fe_all = free_energy()
@@ -490,10 +493,9 @@ def pretrain(settings, percent):
                 name='validate',
                 percent=percent
             )
-            # noinspection PyUnresolvedReferences
             validate_data = csr_matrix(
                 validate_data[:min(2500, validate_data.shape[0])],
-                dtype=theano.config.floatX
+                dtype=DTYPES.FLOATX
             )
             train_set_x.set_value(validate_data.todense(), borrow=True)
             fe_validate = free_energy()
@@ -537,7 +539,6 @@ def pretrain(settings, percent):
             #     cache.save_pretrain_layer(dbn, layer_idx, settings, epoch)
 
     end_time = time.clock()
-    # end-snippet-2
     sys.stderr.write(
         'The pretraining code for file {} ran for {:.2f}m\n'.format(
             os.path.split(__file__)[1],
@@ -545,7 +546,10 @@ def pretrain(settings, percent):
         )
     )
 
-    return dbn, datasets
+    cache.save_dbn(datasets, settings, percent, settings.version)
+    dbn.save()
+
+    return dbn, datasets, settings
 
 
 def finetune(dbn, datasets, settings, percent, klass, klass_num, count):
@@ -644,16 +648,14 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count, percent):
         for to_gpu_batch in range(to_gpu_batches):
             start = (to_gpu_batch * to_gpu_size)
             end = min(start + to_gpu_size, train_data.shape[0])
-            # noinspection PyUnresolvedReferences
             subset_data = csr_matrix(
                 train_data[start:end],
-                dtype=theano.config.floatX
+                dtype=DTYPES.FLOATX
             )
             subset_data = subset_data.todense()
-            # noinspection PyUnresolvedReferences
             subset_labels = np.array(
                 train_labels[start:end],
-                dtype=theano.config.floatX
+                dtype=DTYPES.FLOATX
             )
             train_set_x.set_value(subset_data, borrow=True)
             train_set_y.set_value(subset_labels, borrow=True)

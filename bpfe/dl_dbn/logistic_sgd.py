@@ -37,6 +37,7 @@ import numpy
 
 import theano
 import theano.tensor as T
+from bpfe.dl_dbn.constants import DTYPES
 
 
 debug = False
@@ -69,11 +70,10 @@ class LogisticRegression(object):
         """
         # start-snippet-1
         # initialize with 0 the weights W as a matrix of shape (n_in, n_out)
-        # noinspection PyUnresolvedReferences
         self.W = theano.shared(
             value=numpy.zeros(
                 (n_in, n_out),
-                dtype=theano.config.floatX
+                dtype=DTYPES.FLOATX
             ),
             # TODO figure out initial weights
             # value=numpy.asarray(
@@ -82,17 +82,16 @@ class LogisticRegression(object):
             #         high=1./numpy.sqrt(n_in),
             #         size=(n_in, n_hidden),
             #     ),
-            #     dtype=theano.config.floatX
+            #     dtype=DTYPES.FLOATX
             # ),
             name='W',
             borrow=True
         )
         # initialize the biases b as a vector of n_out 0s
-        # noinspection PyUnresolvedReferences
         self.b = theano.shared(
             value=numpy.zeros(
                 (n_out,),
-                dtype=theano.config.floatX
+                dtype=DTYPES.FLOATX
             ),
             name='b',
             borrow=True
@@ -200,8 +199,7 @@ class LogisticRegression(object):
         if debug:
             log_loss = theano.printing.Print('log_loss')(log_loss)
 
-        # noinspection PyUnresolvedReferences
-        lmbda = T.cast(self.lmbda, dtype=theano.config.floatX)
+        lmbda = T.cast(self.lmbda, dtype=DTYPES.FLOATX)
         regularization = (lmbda / 2.) * T.mean(T.sum(T.sqr(self.W), axis=1))
 
         regularized_log_loss = log_loss + regularization
