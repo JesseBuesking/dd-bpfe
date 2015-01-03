@@ -229,7 +229,7 @@ class PerceptronModel(object):
             self.start,
             self.end,
             self.amt
-        ), open(loc, 'wb'), -1)
+        ), open(loc, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
 
     def load(self, loc):
         """ Load the pickled model weights. """

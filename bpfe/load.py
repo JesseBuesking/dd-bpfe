@@ -101,10 +101,18 @@ def store_raw(seed=1, verbose=False):
         with open('data/data-{}.pkl'.format(name), 'wb') as datafile:
             chunks = len(data) / float(chunk_size)
             chunks = int(math.ceil(chunks))
-            pickle.dump(chunks, datafile, -1)
+            pickle.dump(
+                chunks,
+                datafile,
+                protocol=pickle.HIGHEST_PROTOCOL
+            )
             # noinspection PyArgumentList
             for i in xrange(0, len(data), chunk_size):
-                pickle.dump(data[i: i + chunk_size], datafile, -1)
+                pickle.dump(
+                    data[i: i + chunk_size],
+                    datafile,
+                    protocol=pickle.HIGHEST_PROTOCOL
+                )
 
     store_in_chunks(validate, 'validate')
     store_in_chunks(test, 'test')
@@ -217,6 +225,6 @@ def load_vectorizers(settings):
         print('creating vectorizers for {} chunks'.format(settings.chunks))
         v = get_vectorizers(settings)
         with open(fname, 'wb') as ifile:
-            pickle.dump(v, ifile, -1)
+            pickle.dump(v, ifile, protocol=pickle.HIGHEST_PROTOCOL)
 
     return v

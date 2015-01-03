@@ -264,11 +264,24 @@ class RBM(object):
         # note that we only need the sample at the end of the chain
         chain_end = nv_samples[-1]
 
-        cost = T.mean(self.free_energy(self.input)) - T.mean(
-            self.free_energy(chain_end))
+        cost = \
+            T.mean(self.free_energy(self.input)) - \
+            T.mean(self.free_energy(chain_end))
+
+        # regularization = \
+        #     (self.lmbda / 2.) * \
+        #     (T.mean(T.sum(T.sqr(self.W), axis=1)))
+        #
+        # cost += regularization
 
         # noinspection PyUnresolvedReferences
         learning_rate = T.cast(0.01, dtype=theano.config.floatX)
+
+        def regulared(pidx, param):
+            # We must not compute the gradient through the gibbs sampling
+            grad = T.grad(cost, param, consider_constant=[chain_end])
+            current_cost = learning_rate * grad
+            updates[param] = param - current_cost
 
         def momentumed(pidx, param):
             if len(self.Ms) < pidx + 1:
@@ -290,59 +303,55 @@ class RBM(object):
             updates[M_update] = v_prime
             updates[param] = w_prime
 
-        # end-snippet-3 start-snippet-4
+        def rmsproped(pidx, param):
+            # NOTE : matrix of learning rates
+            if len(self.MSs) < pidx + 1:
+                self.MSs.append(theano.shared(
+                    (param.get_value() * 0.) + 1,
+                    broadcastable=param.broadcastable
+                ))
+
+            # # NOTE: single scalar
+            # if len(self.MSs) < pidx + 1:
+            #     self.MSs.append(theano.shared(1.))
+
+            MS_update = self.MSs[pidx]
+
+            grad = T.grad(cost, param, consider_constant=[chain_end])
+
+            # noinspection PyUnresolvedReferences
+            decay = T.cast(.9, dtype=theano.config.floatX)
+            # noinspection PyUnresolvedReferences
+            one_minus_decay = T.cast(.1, dtype=theano.config.floatX)
+
+            # NOTE: matrix of learning weights
+            current_rmsprop = \
+                (decay * MS_update) + \
+                (one_minus_decay * T.sqrt(T.sum(T.sqr(grad))))
+
+            # # NOTE: single scalar
+            # current_rmsprop = \
+            #     (decay * MS_update) + \
+            #     (one_minus_decay * T.mean(T.sqr(grad)))
+
+            updates[MS_update] = current_rmsprop
+
+            # noinspection PyUnresolvedReferences
+            learning_rate = .1 / current_rmsprop
+            # learning_rate = T.sqrt(
+            #     T.cast(current_rmsprop, dtype=theano.config.floatX)
+            # )
+            # if True:
+            #     learning_rate = theano.printing.Print('lr')(learning_rate)
+
+            updates[param] = param - (learning_rate * grad)
+            # updates[param] = param - (grad / learning_rate)
+
         # constructs the update dictionary
         for pidx, param in enumerate(self.params):
-            # # We must not compute the gradient through the gibbs sampling
-            # grad = T.grad(cost, param, consider_constant=[chain_end])
-            # current_cost = learning_rate * grad
-            # updates[param] = param - current_cost
-
+            # regulared(pidx, param)
             momentumed(pidx, param)
-
-            # if len(self.Ms) < pidx + 1:
-            #     # initialize momentum for this element to zeros
-            #     self.Ms.append(theano.shared(
-            #         param.get_value() * 0.,
-            #         broadcastable=param.broadcastable
-            #     ))
-            #
-            # # if len(self.MSs) < pidx + 1:
-            # #     # initialize momentum for this element to zeros
-            # #     # noinspection PyUnresolvedReferences
-            # #     # self.MSs.append(theano.shared(1.))
-            # #     self.MSs.append(theano.shared(
-            # #         (param.get_value() * 0.) + 1,
-            # #         broadcastable=param.broadcastable
-            # #     ))
-            #
-            # M_update = self.Ms[pidx]
-            # # MS_update = self.MSs[pidx]
-            #
-            # grad = T.grad(cost, param, consider_constant=[chain_end])
-            #
-            # # current_rmsprop = (0.9 * MS_update) + (0.1 * T.sqr(grad))
-            #
-            # # current_rmsprop = (0.9 * MS_update) + \
-            # #                   (0.1 * T.mean(T.sqr(grad)))
-            #
-            # # updates[MS_update] = current_rmsprop
-            #
-            # # noinspection PyUnresolvedReferences
-            # momentum = T.cast(self.momentum, dtype=theano.config.floatX)
-            #
-            # # # noinspection PyUnresolvedReferences
-            # # learning_rate = T.sqrt(
-            # #     T.cast(current_rmsprop, dtype=theano.config.floatX)
-            # # )
-            # learning_rate = 0.1
-            # # learning_rate = theano.printing.Print('lr')(learning_rate)
-            #
-            # current_cost = learning_rate * grad
-            # updates[param] = param - current_cost
-            # # updates[param] = param - (learning_rate * grad)
-            #
-            # updates[M_update] = momentum * M_update + current_cost
+            # rmsproped(pidx, param)
 
         # reconstruction cross-entropy is a better proxy for CD
         monitoring_cost = self.get_reconstruction_cost(
@@ -391,10 +400,4 @@ class RBM(object):
             T.sum(y * T.log(a) + (1 - y) * T.log(1 - a), axis=1)
         )
 
-        regularization = \
-            (self.lmbda / 2.) * \
-            (T.mean(T.sum(T.sqr(self.W), axis=1)))
-
-        regularized_cross_entropy = cross_entropy + regularization
-
-        return regularized_cross_entropy
+        return cross_entropy

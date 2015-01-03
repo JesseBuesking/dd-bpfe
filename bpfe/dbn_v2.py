@@ -131,7 +131,7 @@ def get_vects(name, indices=None, percent=1., unique=True):
                 # create the vectorizer using all the data
                 vectorizer.fit_transform(all_data)
                 # SAVE
-                pickle.dump(vectorizer, ifile, -1)
+                pickle.dump(vectorizer, ifile, protocol=pickle.HIGHEST_PROTOCOL)
         else:
             with open(vectorizer_file, 'rb') as ifile:
                 vectorizer = pickle.load(ifile)
@@ -144,7 +144,7 @@ def get_vects(name, indices=None, percent=1., unique=True):
             data = vstack(data)
 
             # SAVE
-            pickle.dump(data, ifile, -1)
+            pickle.dump(data, ifile, protocol=pickle.HIGHEST_PROTOCOL)
 
             # RETURN
             return data
@@ -223,7 +223,7 @@ def get_labels(name, klass, indices=None, percent=1., unique=True,
             actuals = np.array(actuals)
 
             # SAVE
-            pickle.dump(actuals, ifile, -1)
+            pickle.dump(actuals, ifile, protocol=pickle.HIGHEST_PROTOCOL)
 
             # RETURN
             return actuals
@@ -269,19 +269,20 @@ def DBN_tuning(percent):
     settings.hidden_layers = [
         HiddenLayerSettings(
             1000,
-            4,
+            2,
             ptlr
         ),
-        HiddenLayerSettings(
-            1000,
-            1,
-            ptlr
-        ),
-        HiddenLayerSettings(
-            1000,
-            1,
-            ptlr
-        ),
+        # HiddenLayerSettings(
+        #     2000,
+        #     8,
+        #     ptlr
+        # ),
+        # HiddenLayerSettings(
+        #     2000,
+        #     8,
+        #     ptlr
+        # ),
+
         # HiddenLayerSettings(
         #     100,
         #     300,
@@ -290,7 +291,7 @@ def DBN_tuning(percent):
     ]
     settings.batch_size = 10
     settings.finetuning = FinetuningSettings(
-        100,
+        2,
         ftlr
     )
     settings.chunks = ChunkSettings(1, 1, 1, None)
@@ -444,7 +445,7 @@ def pretrain(settings, percent):
             all_data = get_vects(name=training_dataset_names, percent=percent)
             shuffler = np.arange(all_data.shape[0])
             # noinspection PyUnresolvedReferences
-            np.random.shuffle(shuffler)
+            settings.numpy_rng.shuffle(shuffler)
 
             all_data = all_data[shuffler]
 
@@ -529,7 +530,7 @@ def pretrain(settings, percent):
             errors.append([epoch, layer_idx, time.clock() - tstart, 'time'])
 
             with gzip.open(errname, 'wb') as ifile:
-                pickle.dump(errors, ifile, -1)
+                pickle.dump(errors, ifile, protocol=pickle.HIGHEST_PROTOCOL)
 
             # if (epoch % 20 == 0 and epoch != 0) or \
             #    epoch == settings.hidden_layers[layer_idx].epochs - 1:
@@ -631,7 +632,7 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count, percent):
         )
         shuffler = np.arange(train_data.shape[0])
         # noinspection PyUnresolvedReferences
-        np.random.shuffle(shuffler)
+        settings.numpy_rng.shuffle(shuffler)
 
         train_data = train_data[shuffler]
         train_labels = train_labels[shuffler]
@@ -665,8 +666,8 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count, percent):
 
         val_mmll = get_mmll('validate')
 
-        if epoch % 20 == 0 and epoch != 0:
-            cache.save_finetuning(dbn, settings, klass_num, epoch)
+        # if epoch % 20 == 0 and epoch != 0:
+        #     cache.save_finetuning(dbn, settings, klass_num, epoch)
 
         # if we got the best validation score until now
         if val_mmll < settings.finetuning[klass_num].best_validation_loss:
@@ -686,7 +687,7 @@ def finetune_class(dbn, datasets, settings, klass, klass_num, count, percent):
         scores.append([epoch, train_mmll, 'train'])
         scores.append([epoch, val_mmll, 'validate'])
         with gzip.open(scorename, 'wb') as ifile:
-            pickle.dump(scores, ifile, -1)
+            pickle.dump(scores, ifile, protocol=pickle.HIGHEST_PROTOCOL)
 
         print(
             'epoch {}: train mmll {:.4f}, validate mmll {:.4f} after {}'
@@ -823,7 +824,7 @@ def _td(value):
     return '%02d:%02d:%02d' % (hours, minutes, seconds)
 
 if __name__ == '__main__':
-    DBN_tuning(1.)
+    DBN_tuning(.05)
     # DBN_run()
     # stats()
 

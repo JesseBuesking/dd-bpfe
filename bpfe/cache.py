@@ -21,7 +21,7 @@ def save_pretrain_layer(dbn, layer_num, settings, epoch):
         settings.pretrain_fname(layer_num), str(epoch).zfill(5)
     )
     with gzip.open(fname, 'wb') as ifile:
-        pickle.dump((dbn, settings), ifile, -1)
+        pickle.dump((dbn, settings), ifile, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 def save_finetuning(dbn, settings, klass_num, epoch):
@@ -29,7 +29,7 @@ def save_finetuning(dbn, settings, klass_num, epoch):
         settings.finetuning_fname(), klass_num, str(epoch).zfill(5)
     )
     with gzip.open(fname, 'wb') as ifile:
-        pickle.dump((dbn, settings), ifile, -1)
+        pickle.dump((dbn, settings), ifile, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 def save_best_finetuning(dbn, settings, klass_num):
@@ -37,7 +37,7 @@ def save_best_finetuning(dbn, settings, klass_num):
         settings.finetuning_fname(), klass_num
     )
     with gzip.open(fname, 'wb') as ifile:
-        pickle.dump((dbn, settings), ifile, -1)
+        pickle.dump((dbn, settings), ifile, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 def load_pretrain_layer(layer_num, settings):
