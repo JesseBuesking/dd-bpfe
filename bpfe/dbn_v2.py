@@ -244,29 +244,28 @@ def DBN_tuning(percent):
     settings.hidden_layers = [
         HiddenLayerSettings(
             2000,
-            2,
+            20,
             ptlr
         ),
         HiddenLayerSettings(
             2000,
-            2,
+            20,
             ptlr
         ),
         HiddenLayerSettings(
             2000,
-            2,
+            20,
             ptlr
         ),
-
         # HiddenLayerSettings(
-        #     100,
-        #     300,
+        #     2000,
+        #     8,
         #     ptlr
         # )
     ]
     settings.batch_size = 10
     settings.finetuning = FinetuningSettings(
-        2,
+        30,
         ftlr
     )
     settings.chunks = ChunkSettings(1, 1, 1, None)
@@ -325,8 +324,8 @@ def DBN_run(percent):
 
 def _run_with_params(settings, percent):
     for klass, (klass_num, count) in KLASS_LABEL_INFO.items():
-        if klass != 'Function':
-            continue
+        # if klass != 'Function':
+        #     continue
         dbn, settings = pretrain(settings, percent)
         finetune(dbn, settings, percent, klass, klass_num, count)
 
@@ -371,11 +370,18 @@ def pretrain(settings, percent):
         hidden_layers_sizes=[hl.num_nodes for hl in settings.hidden_layers],
         n_outs=104
     )
-    # a = dbn.load()
-    a = cache.load_full_dbn(percent, settings.version)
+
+    extra = '_'.join([
+        '{}-{}'.format(
+            hl.num_nodes,
+            hl.epochs
+        ) for hl in settings.hidden_layers
+    ])
+
+    a, b = cache.load_full(percent, settings.version, extra)
     if a is not None:
-        settings = cache.load_settings(percent, settings.version)
-        return a, settings
+        b.finetuning.epochs = settings.finetuning.epochs
+        return a, b
 
     #########################
     # PRETRAINING THE MODEL #
@@ -510,10 +516,6 @@ def pretrain(settings, percent):
             with gzip.open(errname, 'wb') as ifile:
                 pickle.dump(errors, ifile, protocol=pickle.HIGHEST_PROTOCOL)
 
-            # if (epoch % 20 == 0 and epoch != 0) or \
-            #    epoch == settings.hidden_layers[layer_idx].epochs - 1:
-            #     cache.save_pretrain_layer(dbn, layer_idx, settings, epoch)
-
     end_time = time.clock()
     sys.stderr.write(
         'The pretraining code for file {} ran for {:.2f}m\n'.format(
@@ -522,21 +524,27 @@ def pretrain(settings, percent):
         )
     )
 
-    cache.save_settings(settings, percent, settings.version)
-    cache.save_full_dbn(dbn, percent, settings.version)
-    # dbn.save()
+    cache.save_full(dbn, settings, percent, settings.version, extra)
 
     return dbn, settings
 
 
 def finetune(dbn, settings, percent, klass, klass_num, count):
     dbn.number_of_outputs = count
-    finetune_class(dbn, settings, klass, klass_num, count, percent)
+    dbn, settings = finetune_class(
+        dbn, settings, klass, klass_num, count, percent)
 
     # try_predict_test(datasets, settings, klass, klass_num)
 
 
 def finetune_class(dbn, settings, klass, klass_num, count, percent):
+    a, b = cache.load_full(percent, settings.version, 'class-{}'.format(
+        '-'.join(klass.lower().split())
+    ))
+    if a is not None:
+        print('loading {} from disk'.format(klass))
+        return a, b
+
     scores = []
 
     epoch = 0
@@ -672,6 +680,12 @@ def finetune_class(dbn, settings, klass, klass_num, count, percent):
         klass,
         _td(time.clock() - start_time)
     ))
+
+    cache.save_full(dbn, settings, percent, settings.version, 'class-{}'.format(
+        '-'.join(klass.lower().split())
+    ))
+
+    return dbn, settings
 
     # if os.path.exists('data/stats/stats.pkl'):
     #     with open('data/stats/stats.pkl', 'rb') as ifile:

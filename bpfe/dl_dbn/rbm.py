@@ -11,6 +11,7 @@ import theano.tensor as T
 from bpfe.dl_dbn.constants import DTYPES
 
 from theano.tensor.shared_randomstreams import RandomStreams
+from theano.tensor.sharedvar import SharedVariable
 
 
 # noinspection PyCallingNonCallable
@@ -310,14 +311,20 @@ class RBM(object):
                     param.get_value() * 0.,
                     broadcastable=param.broadcastable
                 ))
+                # self.Ms.append(theano.shared(0.))
 
             M_update = self.Ms[pidx]
 
-            grad = T.grad(cost, param, consider_constant=[chain_end])
-
             momentum = T.cast(self.momentum, dtype=DTYPES.FLOATX)
+            mom = momentum * M_update
 
-            v_prime = momentum * M_update - learning_rate * grad
+            grad = T.grad(
+                cost,
+                param,
+                consider_constant=[chain_end]
+            )
+
+            v_prime = mom - learning_rate * grad
             w_prime = param + v_prime
             updates[M_update] = v_prime
             updates[param] = w_prime
