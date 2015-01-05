@@ -239,22 +239,22 @@ def DBN_tuning(percent):
     ptlr = 0.01
     ftlr = 0.1
     settings = Settings()
-    settings.version = 11.
+    settings.version = 12.
     settings.k = 1
     settings.hidden_layers = [
         HiddenLayerSettings(
             1000,
-            5,
+            20,
             ptlr
         ),
         HiddenLayerSettings(
             1000,
-            5,
+            20,
             ptlr
         ),
         HiddenLayerSettings(
             1000,
-            5,
+            20,
             ptlr
         ),
         # HiddenLayerSettings(
@@ -265,7 +265,7 @@ def DBN_tuning(percent):
     ]
     settings.batch_size = 10
     settings.finetuning = FinetuningSettings(
-        5,
+        13,
         ftlr
     )
     settings.chunks = ChunkSettings(1, 1, 1, None)
@@ -773,7 +773,7 @@ def _td(value):
     return '%02d:%02d:%02d' % (hours, minutes, seconds)
 
 if __name__ == '__main__':
-    DBN_tuning(.2)
+    DBN_tuning(1.)
     # DBN_run()
     # stats()
 
