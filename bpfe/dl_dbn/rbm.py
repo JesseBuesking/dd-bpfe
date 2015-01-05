@@ -30,8 +30,7 @@ class RBM(object):
         lmbda=0.1,
         momentum=0.9,
         weight_decay_cost=0.001,
-        numpy_rng=None,
-        theano_rng=None
+        numpy_seed=None
     ):
         """
         RBM constructor. Defines the parameters of the model along with
@@ -63,15 +62,9 @@ class RBM(object):
         self.lmbda = lmbda
         self.weight_decay_cost = weight_decay_cost
 
-        if numpy_rng is None:
-            # create a number generator
-            # noinspection PyUnresolvedReferences
-            numpy_rng = numpy.random.RandomState(1234)
+        numpy_rng = numpy.random.RandomState(numpy_seed)
+        theano_rng = RandomStreams(numpy_rng.randint(2 ** 30))
 
-        if theano_rng is None:
-            theano_rng = RandomStreams(numpy_rng.randint(2 ** 30))
-
-        self.numpy_rng = numpy_rng
         self.theano_rng = theano_rng
         self.monitoring_cost = None
         self.updates = None
@@ -83,7 +76,7 @@ class RBM(object):
             # converted using asarray to dtype DTYPES.FLOATX so
             # that the code is runable on GPU
             initial_W = numpy.asarray(
-                self.numpy_rng.uniform(
+                numpy_rng.uniform(
                     # TODO figure out initial weights
                     # low=-.01,
                     # high=.01,

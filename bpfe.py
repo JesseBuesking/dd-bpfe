@@ -476,18 +476,18 @@ def _run_with_params(settings):
     start_time = time.clock()
     ## Pre-train layer-wise
     for layer_idx in xrange(dbn.n_layers):
-        cache_pretrain = cache.load_pretrain_layer(layer_idx, settings)
+        # cache_pretrain = cache.load_pretrain_layer(layer_idx, settings)
         resume_epoch = None
-        if cache_pretrain is not None:
-            print('layer {} already exists on disk, loading ...'.format(
-                layer_idx
-            ))
-            dbn, settings, resume_epoch = cache_pretrain
-            if resume_epoch >= settings.hidden_layers[layer_idx].epochs - 1:
-                continue
-            print('resuming layer {} at epoch {} ...'.format(
-                layer_idx, resume_epoch + 1
-            ))
+        # if cache_pretrain is not None:
+        #     print('layer {} already exists on disk, loading ...'.format(
+        #         layer_idx
+        #     ))
+        #     dbn, settings, resume_epoch = cache_pretrain
+        #     if resume_epoch >= settings.hidden_layers[layer_idx].epochs - 1:
+        #         continue
+        #     print('resuming layer {} at epoch {} ...'.format(
+        #         layer_idx, resume_epoch + 1
+        #     ))
 
         print('getting the pre-training function for layer {} ...'.format(
             layer_idx

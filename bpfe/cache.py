@@ -1,3 +1,5 @@
+
+
 from dircache import listdir
 from genericpath import isfile
 from os.path import join
@@ -5,45 +7,89 @@ import re
 from bpfe.config import StatsSettings
 
 
-# noinspection PyBroadException
-try:
-    import cPickle as pickle
-except:
-    import pickle
-
-
 import gzip
 import os
+import gc
+import cPickle as pickle
+
+
+def _pickle_save(name, value):
+    with open(name, 'wb') as ifile:
+        pickle.dump(
+            value,
+            ifile,
+            protocol=pickle.HIGHEST_PROTOCOL
+        )
+    gc.collect()
+
+
+def _pickle_load(name):
+    if not os.path.exists(name):
+        return None
+
+    with open(name, 'rb') as ifile:
+        value = pickle.load(ifile)
+        gc.collect()
+        return value
 
 
 def save_full(dbn, settings, percent, version, extra=''):
-    fname = 'data/pretrain-layer/dbn-{}-{}-{}.pkl'.format(
+    fname = 'data/pretrain-layer/dbn-{}-{}-{}'.format(
         version, percent, extra
     )
-    with open(fname, 'wb') as ifile:
-        pickle.dump(
-            dbn,
-            ifile,
-            protocol=pickle.HIGHEST_PROTOCOL
-        )
-        pickle.dump(
-            settings,
-            ifile,
-            protocol=pickle.HIGHEST_PROTOCOL
-        )
+
+    _pickle_save(fname + '-1.pkl', dbn)
+    _pickle_save(fname + '-2.pkl', settings)
 
 
 def load_full(percent, version, extra=''):
+    fname = 'data/pretrain-layer/dbn-{}-{}-{}'.format(
+        version, percent, extra
+    )
+    dbn = _pickle_load(fname + '-1.pkl')
+    settings = _pickle_load(fname + '-2.pkl')
+
+    return dbn, settings
+
+
+def save_dbn(dbn, percent, version, extra=''):
+    fname = 'data/pretrain-layer/dbn-{}-{}-{}.pkl'.format(
+        version, percent, extra
+    )
+
+    _pickle_save(fname, dbn)
+
+
+def load_dbn(percent, version, extra=''):
     fname = 'data/pretrain-layer/dbn-{}-{}-{}.pkl'.format(
         version, percent, extra
     )
     if not os.path.exists(fname):
-        return None, None
+        return None
 
-    with open(fname, 'rb') as ifile:
-        dbn = pickle.load(ifile)
-        settings = pickle.load(ifile)
-        return dbn, settings
+    dbn = _pickle_load(fname)
+
+    return dbn
+
+
+def save_settings(settings, percent, version, extra=''):
+    fname = 'data/pretrain-layer/settings-{}-{}-{}.pkl'.format(
+        version, percent, extra
+    )
+
+    _pickle_save(fname, settings)
+
+
+def load_settings(percent, version, extra=''):
+    fname = 'data/pretrain-layer/settings-{}-{}-{}.pkl'.format(
+        version, percent, extra
+    )
+    if not os.path.exists(fname):
+        return None
+
+    settings = _pickle_load(fname)
+
+    return settings
 
 
 def save_pretrain_layer(dbn, layer_num, settings, epoch):

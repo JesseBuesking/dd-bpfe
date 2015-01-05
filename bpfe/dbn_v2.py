@@ -14,7 +14,7 @@ from bpfe import save, cache, scoring
 from bpfe.cache import load_stats
 from bpfe.config import KLASS_LABEL_INFO, Settings, \
     HiddenLayerSettings, FinetuningSettings, ChunkSettings, \
-    REVERSE_LABEL_MAPPING, LABELS, LABEL_MAPPING
+    REVERSE_LABEL_MAPPING, LABELS, LABEL_MAPPING, FLAT_LABELS
 from bpfe.dl_dbn.DBN import DBN
 import bpfe.load as load
 import numpy as np
@@ -239,24 +239,24 @@ def DBN_tuning(percent):
     ptlr = 0.01
     ftlr = 0.1
     settings = Settings()
-    settings.version = 10.
+    settings.version = 11.
     settings.k = 1
     settings.hidden_layers = [
         HiddenLayerSettings(
-            2000,
-            20,
+            1000,
+            2,
             ptlr
         ),
-        HiddenLayerSettings(
-            2000,
-            20,
-            ptlr
-        ),
-        HiddenLayerSettings(
-            2000,
-            20,
-            ptlr
-        ),
+        # HiddenLayerSettings(
+        #     1000,
+        #     2,
+        #     ptlr
+        # ),
+        # HiddenLayerSettings(
+        #     1000,
+        #     2,
+        #     ptlr
+        # ),
         # HiddenLayerSettings(
         #     2000,
         #     8,
@@ -265,7 +265,7 @@ def DBN_tuning(percent):
     ]
     settings.batch_size = 10
     settings.finetuning = FinetuningSettings(
-        30,
+        2,
         ftlr
     )
     settings.chunks = ChunkSettings(1, 1, 1, None)
@@ -324,10 +324,17 @@ def DBN_run(percent):
 
 def _run_with_params(settings, percent):
     for klass, (klass_num, count) in KLASS_LABEL_INFO.items():
-        # if klass != 'Function':
-        #     continue
         dbn, settings = pretrain(settings, percent)
-        finetune(dbn, settings, percent, klass, klass_num, count)
+        dbn, settings = finetune(
+            dbn, settings, percent, klass, klass_num, count)
+        mmll('validate', dbn, settings, klass, percent, verbose=True)
+        mmll('test', dbn, settings, klass, percent, verbose=True)
+
+    probas = predict_submission(percent, settings)
+    print('predicted submission')
+    print(probas.shape)
+    print(probas[:10])
+    save_submission(probas, settings, percent)
 
 
 def pretrain(settings, percent):
@@ -531,20 +538,27 @@ def pretrain(settings, percent):
 
 def finetune(dbn, settings, percent, klass, klass_num, count):
     dbn.number_of_outputs = count
-    dbn, settings = finetune_class(
-        dbn, settings, klass, klass_num, count, percent)
 
-    # try_predict_test(datasets, settings, klass, klass_num)
+    extra = 'class-{}'.format(
+        '-'.join(klass.lower().split())
+    )
+    a = cache.load_dbn(percent, settings.version, extra)
+    if a is not None:
+        b = cache.load_settings(percent, settings.version, extra)
+        print('loading {} from disk'.format(klass))
+        dbn, settings = a, b
+    else:
+        dbn, settings = finetune_class(
+            dbn, settings, klass, klass_num, count, percent)
+        import gc
+        gc.collect()
+        cache.save_dbn(dbn, percent, settings.version, extra)
+        cache.save_settings(settings, percent, settings.version, extra)
+
+    return dbn, settings
 
 
 def finetune_class(dbn, settings, klass, klass_num, count, percent):
-    a, b = cache.load_full(percent, settings.version, 'class-{}'.format(
-        '-'.join(klass.lower().split())
-    ))
-    if a is not None:
-        print('loading {} from disk'.format(klass))
-        return a, b
-
     scores = []
 
     epoch = 0
@@ -553,29 +567,6 @@ def finetune_class(dbn, settings, klass, klass_num, count, percent):
         dbn, settings, epoch = val
     else:
         dbn.create_output_layer(settings.train_size)
-
-    def get_mmll(name):
-        _data = get_vects(name, percent=percent)
-        _labels = get_labels(
-            name,
-            LABEL_MAPPING[klass],
-            percent=percent,
-            argmax=False
-        )
-        if name == 'train':
-            preds = dbn.predict_proba(_data, settings.batch_size)
-        elif name == 'validate':
-            preds = dbn.predict_proba(_data, settings.batch_size)
-        elif name == 'test':
-            preds = dbn.predict_proba(_data, settings.batch_size)
-        else:
-            raise
-        mmll = scoring.multi_multi_log_loss(
-            preds,
-            _labels,
-            np.array([range(_labels.shape[1])])
-        )
-        return mmll
 
     if epoch >= settings.finetuning.epochs:
         print('... finetuning for "{}" is already complete'.format(klass))
@@ -619,7 +610,7 @@ def finetune_class(dbn, settings, klass, klass_num, count, percent):
             0.9
         )
 
-        val_mmll = get_mmll('validate')
+        val_mmll = mmll('validate', dbn, settings, klass, percent)
 
         # if epoch % 20 == 0 and epoch != 0:
         #     cache.save_finetuning(dbn, settings, klass_num, epoch)
@@ -630,7 +621,7 @@ def finetune_class(dbn, settings, klass, klass_num, count, percent):
             settings.finetuning[klass_num].best_validation_loss = val_mmll
             settings.finetuning[klass_num].best_iteration = epoch
 
-        train_mmll = get_mmll('train')
+        train_mmll = mmll('train', dbn, settings, klass, percent)
 
         scorename = data_dir + '/ft-{}-{:.2f}.pkl.gz'.format(
             LABEL_MAPPING[klass], percent
@@ -672,17 +663,13 @@ def finetune_class(dbn, settings, klass, klass_num, count, percent):
             klass,
             settings.finetuning[klass_num].best_validation_loss,
             settings.finetuning[klass_num].best_iteration,
-            get_mmll('test')
+            mmll('test', dbn, settings, klass, percent)
         )
     )
 
     sys.stderr.write('fine tuning for {} ran for {}\n'.format(
         klass,
         _td(time.clock() - start_time)
-    ))
-
-    cache.save_full(dbn, settings, percent, settings.version, 'class-{}'.format(
-        '-'.join(klass.lower().split())
     ))
 
     return dbn, settings
@@ -698,84 +685,84 @@ def finetune_class(dbn, settings, klass, klass_num, count, percent):
     #     pickle.dump(stats, ifile)
 
 
-def try_predict_test(datasets, settings, klass, klass_num):
-    (test_set_x, test_set_y) = datasets[2]
+def predict_probas(dbn, settings, name, percent):
+    unique = True
+    if name == 'submission':
+        unique = False
+    _data = get_vects(name, percent=percent, unique=unique)
+    preds = dbn.predict_proba(_data, settings.batch_size)
+    return preds
 
-    print('... loading best model for class "{}"'.format(klass))
-    val = cache.load_best_finetuning(settings, klass_num)
-    if val is None:
-        print('no "best" model for class "{}"'.format(klass))
-        return
 
-    dbn, settings = val
-    train_fn, train_model, validate_model, test_model, \
-        train_pred, test_pred, submission_pred = \
-        dbn.build_finetune_functions(
-            datasets=datasets,
-            batch_size=settings.batch_size,
-            learning_rate=settings.finetuning.learning_rate
-        )
-
-    test_predictions = test_pred(vectorize(
-        save.test,
-        test_set_x,
-        test_set_y,
-        settings,
-        klass_num
-    ))
-
-    num_predictions = len(test_predictions)
-    print(num_predictions)
-
-    deal_gen = load.gen_test(settings, batch_size=num_predictions)
-
-    total_predictions, matches, misses, score, idx = 0, 0, 0, 0, 0
-    red = reduce(
-        lambda x, y: x + y,
-        [dg for dg in deal_gen],
-        []
+def mmll(name, dbn, settings, klass, percent, verbose=False):
+    _labels = get_labels(
+        name,
+        LABEL_MAPPING[klass],
+        percent=percent,
+        argmax=False
     )
-    for data in red:
-        am = np.argmax(test_predictions[idx])
-        actual_num = data[1].to_klass_num(klass_num)
-        miss = actual_num != am
-        matches += not miss
-        misses += miss
-        total_predictions += 1
+    preds = predict_probas(dbn, settings, name, percent)
+    mmll = scoring.multi_multi_log_loss(
+        preds,
+        _labels,
+        np.array([range(_labels.shape[1])])
+    )
+    if verbose:
+        sys.stderr.write('mmll "{}" {}: {:.4f}\n'.format(
+            klass,
+            name,
+            mmll
+        ))
+    return mmll
 
-        # noinspection PyUnresolvedReferences
-        score += ((
-            np.array(data[1].to_vec(klass_num)) - test_predictions[idx]
-        ) ** 2).sum()
 
-        # print first 3 misses
-        if misses <= 3 and miss:
-            print('id {}: {}'.format(data[0].id, data[1].function))
-            print('  expected {} -> {}'.format(
-                data[1].to_klass_num(klass_num),
-                am
-            ))
-            preds = '  '
-            len_preds = len(test_predictions[idx])
-            per_row = 8
-            for col in range(int(math.ceil(len_preds / float(per_row)))):
-                cidx = col * per_row
-                preds += '{:>2}: '.format(cidx)
-                for j in range(per_row):
-                    if j + cidx >= len_preds:
-                        break
-                    preds += '{:.8f} '.format(test_predictions[idx][j + cidx])
-                preds += '\n  '
-            print(preds)
+def save_submission(data, settings, percent):
+    print('saving submission file')
 
-        idx += 1
-    score /= 2.0
-    print('sum of squares error: {:.4f}'.format(score/total_predictions))
-    print('matches {}/{} = {:.4f}% error rate'.format(
-        matches,
-        total_predictions,
-        (1 - matches / float(total_predictions)) * 100.0
-    ))
+    header = ['__'.join(i) for i in FLAT_LABELS]
+    headers = []
+    for i in header:
+        if ' ' in i:
+            i = '"{}"'.format(i)
+        headers.append(i)
+
+    header_line = ',' + ','.join(headers)
+
+    ids = [dg.id for dg, _ in load.ugen_submission(False)]
+    print('submission rows: {}'.format(len(ids)))
+    fname = 'data/submission/{}-{}.csv.gz'.format(settings.version, percent)
+    with gzip.open(fname, 'w') as ifile:
+        ifile.write(header_line + '\n')
+        for idx, cid in enumerate(ids):
+            row = '{},{}'.format(
+                cid,
+                ','.join(
+                    ['{:.12f}'.format(sub) for sub in data[idx]]
+                )
+            )
+            ifile.write(row + '\n')
+
+
+def predict_submission(percent, settings):
+    print('getting submission predictions')
+    probas = None
+    for klass in KLASS_LABEL_INFO.keys():
+        print('\tgetting predictions for {}'.format(klass))
+        extra = 'class-{}'.format(
+            '-'.join(klass.lower().split())
+        )
+        dbn = cache.load_dbn(percent, settings.version, extra)
+        if dbn is not None:
+            settings = cache.load_settings(percent, settings.version, extra)
+        else:
+            raise Exception('missing klass {}'.format(klass))
+
+        klass_probas = predict_probas(dbn, settings, 'submission', 1.)
+        if probas is None:
+            probas = klass_probas
+        else:
+            probas = np.concatenate((probas, klass_probas), axis=1)
+    return probas
 
 
 def _td(value):

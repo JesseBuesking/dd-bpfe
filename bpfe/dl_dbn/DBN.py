@@ -141,7 +141,7 @@ class DBN(object):
             return self
 
     def create_hidden_layer(
-            self, layer_num, numpy_rng, theano_rng, train_size):
+            self, layer_num, numpy_rng, train_size):
         # construct the sigmoidal layer
         # the size of the input is either the number of hidden
         # units of the layer below or the input size if we are on
@@ -176,8 +176,7 @@ class DBN(object):
 
         # Construct an RBM that shared weights with this layer
         rbm_layer = RBM(
-            numpy_rng=numpy_rng,
-            theano_rng=theano_rng,
+            numpy_seed=numpy_rng.randint(1e9),
             input_vector=layer_input,
             n_in=input_size,
             n_hidden=self.hidden_layer_sizes[layer_num],
@@ -232,7 +231,6 @@ class DBN(object):
             rbm = self.create_hidden_layer(
                 layer_num,
                 numpy_rng,
-                theano_rng,
                 train_size
             )
 
