@@ -244,19 +244,19 @@ def DBN_tuning(percent):
     settings.hidden_layers = [
         HiddenLayerSettings(
             1000,
-            2,
+            5,
             ptlr
         ),
-        # HiddenLayerSettings(
-        #     1000,
-        #     2,
-        #     ptlr
-        # ),
-        # HiddenLayerSettings(
-        #     1000,
-        #     2,
-        #     ptlr
-        # ),
+        HiddenLayerSettings(
+            1000,
+            5,
+            ptlr
+        ),
+        HiddenLayerSettings(
+            1000,
+            5,
+            ptlr
+        ),
         # HiddenLayerSettings(
         #     2000,
         #     8,
@@ -265,7 +265,7 @@ def DBN_tuning(percent):
     ]
     settings.batch_size = 10
     settings.finetuning = FinetuningSettings(
-        2,
+        5,
         ftlr
     )
     settings.chunks = ChunkSettings(1, 1, 1, None)
@@ -550,10 +550,6 @@ def finetune(dbn, settings, percent, klass, klass_num, count):
     else:
         dbn, settings = finetune_class(
             dbn, settings, klass, klass_num, count, percent)
-        import gc
-        gc.collect()
-        cache.save_dbn(dbn, percent, settings.version, extra)
-        cache.save_settings(settings, percent, settings.version, extra)
 
     return dbn, settings
 
@@ -612,14 +608,19 @@ def finetune_class(dbn, settings, klass, klass_num, count, percent):
 
         val_mmll = mmll('validate', dbn, settings, klass, percent)
 
-        # if epoch % 20 == 0 and epoch != 0:
-        #     cache.save_finetuning(dbn, settings, klass_num, epoch)
-
         # if we got the best validation score until now
         if val_mmll < settings.finetuning[klass_num].best_validation_loss:
             # save best validation score and iteration number
             settings.finetuning[klass_num].best_validation_loss = val_mmll
             settings.finetuning[klass_num].best_iteration = epoch
+
+            import gc
+            gc.collect()
+            extra = 'class-{}'.format(
+                '-'.join(klass.lower().split())
+            )
+            cache.save_dbn(dbn, percent, settings.version, extra)
+            cache.save_settings(settings, percent, settings.version, extra)
 
         train_mmll = mmll('train', dbn, settings, klass, percent)
 
@@ -746,7 +747,7 @@ def save_submission(data, settings, percent):
 def predict_submission(percent, settings):
     print('getting submission predictions')
     probas = None
-    for klass in KLASS_LABEL_INFO.keys():
+    for klass in sorted(LABELS.keys()):
         print('\tgetting predictions for {}'.format(klass))
         extra = 'class-{}'.format(
             '-'.join(klass.lower().split())
@@ -772,7 +773,7 @@ def _td(value):
     return '%02d:%02d:%02d' % (hours, minutes, seconds)
 
 if __name__ == '__main__':
-    DBN_tuning(.05)
+    DBN_tuning(.2)
     # DBN_run()
     # stats()
 
