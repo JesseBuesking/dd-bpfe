@@ -1,3 +1,5 @@
+import csv
+import gc
 import gzip
 import os
 from os.path import dirname
@@ -18,7 +20,8 @@ from sklearn.naive_bayes import MultinomialNB
 from sklearn.pipeline import Pipeline
 import sys
 import time
-from bpfe import load, util, feature_engineering, scoring
+from bpfe import load, util, feature_engineering, scoring, cache, dbn_v2
+from scoring import BOX_PLOTS_COLUMN_INDICES
 from bpfe.config import Settings, ChunkSettings, KLASS_LABEL_INFO, LABEL_MAPPING, LABELS, FLAT_LABELS
 from bpfe.entities import Data, Label
 import numpy as np
@@ -1296,6 +1299,7 @@ def weighted_average_pred(name='train', unique=True):
                 for nidx in range(num_classifiers):
                     vect = get_vects(name, [nidx], unique=unique)
                     pr = classifiers[nidx].predict_proba(vect)
+                    # predict dbn here
                     pr2 = pr * weights[nidx]
                     pp.append(pr2)
                 pred = preds[i]
@@ -1353,6 +1357,374 @@ def weighted_average_pred(name='train', unique=True):
                 ifile.write(row + '\n')
 
 
+def bogus(name='train', unique=True):
+    kfolds = 5
+
+    if name == 'train':
+        g = ugen_train
+    elif name == 'test':
+        g = ugen_test
+    elif name == 'validate':
+        g = ugen_validate
+    elif name == 'submission':
+        g = ugen_submission
+    else:
+        raise
+
+    # ordered_classes = sorted(LABELS.keys())
+    # all_preds = None
+    # all_actuals = None
+    # for klass in ordered_classes:
+    #     print('getting predictions for {}'.format(klass))
+    #     labels = LABELS[klass]
+    #     attr = LABEL_MAPPING[klass]
+    #
+    #     if name != 'submission':
+    #         ty = []
+    #         for idx, (d, l) in enumerate(g(unique=unique)):
+    #             ty.append(
+    #                 getattr(l, attr)
+    #             )
+    #         ty = np.array(ty)
+    #
+    #     actuals = []
+    #     for cidx in range(ty.shape[0]):
+    #         label = ty[cidx]
+    #         tmp = np.zeros(len(LABELS[klass]))
+    #         tmp[LABELS[klass].index(label)] = 1.0
+    #         label = tmp
+    #         actuals.append(label)
+    #     actuals = np.array(actuals)
+    #
+    #     if all_actuals is None:
+    #         all_actuals = actuals
+    #     else:
+    #         all_actuals = np.concatenate([all_actuals, actuals], axis=1)
+    #
+    #     fname = dirname(dirname(__file__)) + \
+    #         '/data/models/weighted-average-{}.pkl'.format(attr)
+    #
+    #     with gzip.open(fname + '.gz', 'rb') as ifile:
+    #         preds = []
+    #         for i in range(kfolds):
+    #             preds.append(None)
+    #
+    #         for i in range(kfolds):
+    #             weights, classifiers = pickle.load(ifile)
+    #
+    #             classes = [
+    #                 list(z.named_steps['classifier'].classes_) for z in
+    #                 classifiers
+    #             ]
+    #             assert classes[0] == labels
+    #             num_classifiers = len(classifiers)
+    #             # to get just the logistic regression score
+    #             # num_classifiers = 1
+    #
+    #             pp = []
+    #             for nidx in range(num_classifiers):
+    #                 vect = get_vects(name, [nidx], unique=unique)
+    #                 chunksize = 1000
+    #                 chunks = int(vect.shape[0] / chunksize) + 1
+    #                 prs = []
+    #                 for o in range(chunks):
+    #                     prs.append(classifiers[nidx].predict_proba(vect[
+    #                         o * chunksize : min((o+1) * chunksize, vect.shape[0])
+    #                     ]))
+    #                 pr = np.concatenate(prs, axis=0)
+    #                 print(pr.shape[0])
+    #                 # predict dbn here
+    #                 pr2 = pr * weights[nidx]
+    #                 pp.append(pr2)
+    #             pred = preds[i]
+    #             for p in pp:
+    #                 if pred is None:
+    #                     pred = p
+    #                 else:
+    #                     pred += p
+    #             pred /= float(num_classifiers)
+    #             preds[i] = pred
+    #
+    #         preds = np.mean(preds, axis=0)
+    #
+    #         if all_preds is None:
+    #             all_preds = preds
+    #         else:
+    #             all_preds = np.concatenate([all_preds, preds], axis=1)
+    #
+    # with open('data/models/train-blend.pkl', 'wb') as ifile:
+    #     pickle.dump(all_preds, ifile, -1)
+    # raise
+    #
+    # # # getting dbn probas
+    # dbn_probas = None
+    # version = 14.
+    # percent = .9
+    # for klass in sorted(LABELS.keys()):
+    #     print('\tgetting predictions for {}'.format(klass))
+    #     extra = 'class-{}'.format(
+    #         '-'.join(klass.lower().split())
+    #     )
+    #     dbn = cache.load_dbn(percent, version, extra)
+    #     if dbn is not None:
+    #         settings = cache.load_settings(percent, version, extra)
+    #     else:
+    #         raise Exception('missing klass {}'.format(klass))
+    #
+    #     klass_probas = dbn_v2.predict_probas(dbn, settings, name, 1.)
+    #     if dbn_probas is None:
+    #         dbn_probas = klass_probas
+    #     else:
+    #         dbn_probas = np.concatenate((dbn_probas, klass_probas), axis=1)
+    #
+    # with open('data/models/train-dbn-fin14.pkl', 'wb') as ifile:
+    #     pickle.dump(dbn_probas, ifile, -1)
+    # raise
+    #
+    # ordered_classes = sorted(LABELS.keys())
+    # all_preds = None
+    # all_actuals = None
+    # for klass in ordered_classes:
+    #     print('getting predictions for {}'.format(klass))
+    #     labels = LABELS[klass]
+    #     attr = LABEL_MAPPING[klass]
+    #
+    #     if name != 'submission':
+    #         ty = []
+    #         for idx, (d, l) in enumerate(g(unique=unique)):
+    #             ty.append(
+    #                 getattr(l, attr)
+    #             )
+    #         ty = np.array(ty)
+    #
+    #     actuals = []
+    #     for cidx in range(ty.shape[0]):
+    #         label = ty[cidx]
+    #         tmp = np.zeros(len(LABELS[klass]))
+    #         tmp[LABELS[klass].index(label)] = 1.0
+    #         label = tmp
+    #         actuals.append(label)
+    #     actuals = np.array(actuals)
+    #
+    #     if all_actuals is None:
+    #         all_actuals = actuals
+    #     else:
+    #         all_actuals = np.concatenate([all_actuals, actuals], axis=1)
+    #
+    # with open('data/models/train-blend.pkl', 'rb') as ifile:
+    #     all_preds = pickle.load(ifile)
+    # with open('data/models/train-dbn-fin.pkl', 'rb') as ifile:
+    #     dbn_probas1 = pickle.load(ifile)
+    # with open('data/models/train-dbn-fin14.pkl', 'rb') as ifile:
+    #     dbn_probas2 = pickle.load(ifile)
+    #
+    # num_classifiers = 3
+    # print('finding deltas')
+    # deltas = [
+    #     1 - (all_actuals - all_preds),
+    #     1 - (all_actuals - dbn_probas1),
+    #     1 - (all_actuals - dbn_probas2)
+    # ]
+    #
+    # print('computing adjusted weights')
+    # adj_weights = []
+    # for d in deltas:
+    #     adj_weights.append(
+    #         (d - np.min(deltas, axis=0)) /
+    #         (np.max(deltas, axis=0) - np.min(deltas, axis=0))
+    #     )
+    #
+    # print('cleaning adjusted weights')
+    # for i in range(len(adj_weights)):
+    #     nw = adj_weights[i]
+    #     # noinspection pyunresolvedreferences
+    #     nw[np.isnan(nw)] = 1
+    #     eps = 1e-3
+    #     nw = np.clip(nw, eps, 1 - eps)
+    #     adj_weights[i] = nw
+    #
+    # print('finding final weights')
+    # combined_weights = np.zeros((num_classifiers, 104)) + \
+    #     (1 / float(num_classifiers))
+    # for nidx, nw in enumerate(adj_weights):
+    #     combined_weights[nidx] = np.mean(nw, axis=0)
+    #
+    # print('combined weights', combined_weights)
+    # with open('data/models/combined-weights2.pkl', 'wb') as ifile:
+    #     pickle.dump(combined_weights, ifile, -1)
+    #
+    # all_preds = (all_preds * combined_weights[0]) + \
+    #             (dbn_probas1 * combined_weights[1]) + \
+    #             (dbn_probas2 * combined_weights[1])
+    # all_preds /= 3.
+    #
+    # mmll = scoring.multi_multi_log_loss(
+    #     all_preds,
+    #     all_actuals,
+    #     BOX_PLOTS_COLUMN_INDICES
+    # )
+    # print('mmll: {:.4f}'.format(mmll))
+    # raise
+    #
+    # # we now have the final weights, so make predictions on the submission set
+    #
+    # kfolds = 5
+    # name = 'submission'
+    # unique = False
+    #
+    # gc.collect()
+    # ordered_classes = sorted(LABELS.keys())
+    # all_preds = None
+    # for klass in ordered_classes:
+    #     print('getting predictions for {}'.format(klass))
+    #     labels = LABELS[klass]
+    #     attr = LABEL_MAPPING[klass]
+    #
+    #     fname = dirname(dirname(__file__)) + \
+    #         '/data/models/weighted-average-{}.pkl'.format(attr)
+    #
+    #     with gzip.open(fname + '.gz', 'rb') as ifile:
+    #         preds = []
+    #         for i in range(kfolds):
+    #             preds.append(None)
+    #
+    #         for i in range(kfolds):
+    #             weights, classifiers = pickle.load(ifile)
+    #
+    #             classes = [
+    #                 list(z.named_steps['classifier'].classes_) for z in
+    #                 classifiers
+    #             ]
+    #             assert classes[0] == labels
+    #             num_classifiers = len(classifiers)
+    #             # to get just the logistic regression score
+    #             # num_classifiers = 1
+    #
+    #             pp = []
+    #             for nidx in range(num_classifiers):
+    #                 vect = get_vects(name, [nidx], unique=unique)
+    #                 chunksize = 1000
+    #                 chunks = int(vect.shape[0] / chunksize) + 1
+    #                 prs = []
+    #                 for o in range(chunks):
+    #                     prs.append(classifiers[nidx].predict_proba(vect[
+    #                        o * chunksize : min((o+1) * chunksize, vect.shape[0])
+    #                     ]))
+    #                 pr = np.concatenate(prs, axis=0)
+    #                 print(pr.shape[0])
+    #
+    #                 # predict dbn here
+    #                 pr2 = pr * weights[nidx]
+    #                 pp.append(pr2)
+    #             pred = preds[i]
+    #             for p in pp:
+    #                 if pred is None:
+    #                     pred = p
+    #                 else:
+    #                     pred += p
+    #             pred /= float(num_classifiers)
+    #             preds[i] = pred
+    #
+    #         preds = np.mean(preds, axis=0)
+    #
+    #         if name == 'submission':
+    #             if all_preds is None:
+    #                 all_preds = preds
+    #             else:
+    #                 all_preds = np.concatenate([all_preds, preds], axis=1)
+    #
+    # gc.collect()
+    # # getting dbn probas
+    # dbn_probas = None
+    # version = 12.
+    # percent = 1.
+    # for klass in sorted(LABELS.keys()):
+    #     print('\tgetting predictions for {}'.format(klass))
+    #     extra = 'class-{}'.format(
+    #         '-'.join(klass.lower().split())
+    #     )
+    #     dbn = cache.load_dbn(percent, version, extra)
+    #     if dbn is not None:
+    #         settings = cache.load_settings(percent, version, extra)
+    #     else:
+    #         raise Exception('missing klass {}'.format(klass))
+    #
+    #     klass_probas = dbn_v2.predict_probas(dbn, settings, name, percent)
+    #     if dbn_probas is None:
+    #         dbn_probas = klass_probas
+    #     else:
+    #         dbn_probas = np.concatenate((dbn_probas, klass_probas), axis=1)
+    #
+    # final_preds = (all_preds * combined_weights[0]) + \
+    #               (dbn_probas * combined_weights[1])
+    # final_preds /= 2.
+    #
+    # header = ['__'.join(i) for i in FLAT_LABELS]
+    # headers = []
+    # for i in header:
+    #     if ' ' in i:
+    #         i = '"{}"'.format(i)
+    #     headers.append(i)
+    #
+    # header_line = ',' + ','.join(headers)
+    # print(header_line)
+    # fname = dirname(dirname(__file__)) + '/data/submission/blend-dbn.csv'
+    # with open(fname, 'w') as ifile:
+    #     ifile.write(header_line + '\n')
+    #     for idx, (data, label) in enumerate(ugen_submission(unique)):
+    #         row = '{},{}'.format(
+    #             data.id,
+    #             ','.join(['{:.12f}'.format(n) for n in final_preds[idx]])
+    #         )
+    #         if idx < 10:
+    #             print(row)
+    #         ifile.write(row + '\n')
+
+    blend = open('data/submission/blend-.6035.csv', 'r')
+    blend_reader = csv.reader(blend)
+    dbn1 = open('data/submission/12.0-1.0.csv', 'r')
+    dbn_reader1 = csv.reader(dbn1)
+    dbn2 = open('data/submission/14.0-0.9.csv', 'r')
+    dbn_reader2 = csv.reader(dbn2)
+    with open('data/models/combined-weights2.pkl', 'rb') as ifile:
+        combined_weights = pickle.load(ifile)
+
+    print(combined_weights)
+
+    with open('data/submission/blend-dbn3.csv', 'w') as blend_dbn:
+        first = next(blend_reader)
+        next(dbn_reader1)
+        next(dbn_reader2)
+        blend_dbn.write(
+            ',' + ','.join(['"{}"'.format(i) for i in first[1:]]) + '\n'
+        )
+
+        for b in blend_reader:
+            d1 = next(dbn_reader1)
+            d2 = next(dbn_reader2)
+            bid = b[0]
+            did1 = d1[0]
+            did2 = d2[0]
+            assert bid == did1 == did2
+            bf = np.array([float(i) for i in b[1:]])
+            # print(bf)
+            df1 = np.array([float(i) for i in d1[1:]])
+            # print(df1)
+            df2 = np.array([float(i) for i in d2[1:]])
+            # print(df2)
+
+            fin = (bf * combined_weights[0]) + \
+                  (df1 * combined_weights[1]) + \
+                  (df2 * combined_weights[2])
+            fin /= 3.
+            row = bid + "," + ",".join([
+                '{:.12f}'.format(sub) for sub in fin
+            ])
+            # print(fin)
+            # print(row)
+            blend_dbn.write(row + '\n')
+
+
 if __name__ == '__main__':
     # run()
     # log_reg_tuning(False)
@@ -1364,4 +1736,6 @@ if __name__ == '__main__':
     # gradient_boosting_tuning(False)
 
     # weighted_average(create_file=True)
-    weighted_average_pred('submission', False)
+    # weighted_average_pred('submission', False)
+
+    bogus('train', True)

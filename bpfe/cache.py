@@ -14,23 +14,38 @@ import cPickle as pickle
 
 
 def _pickle_save(name, value):
-    with open(name, 'wb') as ifile:
-        pickle.dump(
-            value,
-            ifile,
-            protocol=pickle.HIGHEST_PROTOCOL
-        )
-    gc.collect()
+    if name.endswith('gz'):
+        with gzip.open(name, 'wb') as ifile:
+            pickle.dump(
+                value,
+                ifile,
+                protocol=pickle.HIGHEST_PROTOCOL
+            )
+        gc.collect()
+    else:
+        with open(name, 'wb') as ifile:
+            pickle.dump(
+                value,
+                ifile,
+                protocol=pickle.HIGHEST_PROTOCOL
+            )
+        gc.collect()
 
 
 def _pickle_load(name):
     if not os.path.exists(name):
         return None
 
-    with open(name, 'rb') as ifile:
-        value = pickle.load(ifile)
-        gc.collect()
-        return value
+    if name.endswith('gz'):
+        with gzip.open(name, 'rb') as ifile:
+            value = pickle.load(ifile)
+            gc.collect()
+            return value
+    else:
+        with open(name, 'rb') as ifile:
+            value = pickle.load(ifile)
+            gc.collect()
+            return value
 
 
 def save_full(dbn, settings, percent, version, extra=''):

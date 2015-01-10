@@ -239,22 +239,22 @@ def DBN_tuning(percent):
     ptlr = 0.01
     ftlr = 0.1
     settings = Settings()
-    settings.version = 12.
+    settings.version = 14.
     settings.k = 1
     settings.hidden_layers = [
         HiddenLayerSettings(
-            1000,
-            20,
+            1250,
+            8,
             ptlr
         ),
         HiddenLayerSettings(
-            1000,
-            20,
+            1250,
+            10,
             ptlr
         ),
         HiddenLayerSettings(
-            1000,
-            20,
+            1250,
+            10,
             ptlr
         ),
         # HiddenLayerSettings(
@@ -773,7 +773,7 @@ def _td(value):
     return '%02d:%02d:%02d' % (hours, minutes, seconds)
 
 if __name__ == '__main__':
-    DBN_tuning(1.)
+    DBN_tuning(.9)
     # DBN_run()
     # stats()
 

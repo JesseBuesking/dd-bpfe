@@ -282,11 +282,11 @@ class RBM(object):
             T.mean(self.free_energy(self.input)) - \
             T.mean(self.free_energy(chain_end))
 
-        # regularization = \
-        #     (self.lmbda / 2.) * \
-        #     (T.mean(T.sum(T.sqr(self.W), axis=1)))
-        #
-        # cost += regularization
+        regularization = \
+            (self.lmbda / 2.) * \
+            (T.mean(T.sum(T.sqr(self.hidden_layer.W), axis=1)))
+
+        cost += regularization
 
         learning_rate = T.cast(0.01, dtype=DTYPES.FLOATX)
 

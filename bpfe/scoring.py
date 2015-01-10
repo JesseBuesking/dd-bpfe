@@ -63,6 +63,17 @@ def _ll_correct(actual, predicted):
     return actual * math.log(predicted) + (1 - actual) * math.log(1 - predicted)
 
 
+BOX_PLOTS_COLUMN_INDICES = [range(37),
+                            range(37,48),
+                            range(48,51),
+                            range(51,76),
+                            range(76,79),
+                            range(79,82),
+                            range(82,87),
+                            range(87,96),
+                            range(96,104)]
+
+
 def multi_multi_log_loss(predicted, actual, class_column_indices, eps=1e-15):
     """
     Multi class, multi-label version of Logarithmic Loss metric.
